@@ -3,3 +3,6 @@ __pycache__/
 
 # Rust build output for the vendored crates
 /target
+
+# Scored runs are measurements, not source
+evals/results/
