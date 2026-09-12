@@ -113,8 +113,15 @@ check "reports absent"  "True" "$(printf '%s' "$OUT" | grep -q 'already absent' 
 
 echo "installing does not modify the repository"
 if git -C "$HERE/.." rev-parse --git-dir >/dev/null 2>&1; then
+  # Compared before and after rather than against a clean tree. Checking the
+  # absolute state made this fail whenever the developer running the suite had
+  # uncommitted work in these paths, which is most of the time while the tool
+  # is being changed, and a check that cries wolf during development is one
+  # people learn to ignore.
+  BEFORE="$(git -C "$HERE/.." diff --name-only -- bin skills install.sh)"
   run "$WORK/clean" >/dev/null
-  check "no tracked file modified" "" "$(git -C "$HERE/.." diff --name-only -- bin skills install.sh)"
+  AFTER="$(git -C "$HERE/.." diff --name-only -- bin skills install.sh)"
+  check "no tracked file modified" "$BEFORE" "$AFTER"
 fi
 
 # --- an unknown option is rejected ------------------------------------------
