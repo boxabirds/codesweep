@@ -42,7 +42,7 @@ evidence than a `violation` one.
 
 ## The protocol
 
-Follow these steps in order. Do not skip step 2 or step 3.
+Follow these steps in order. Do not skip steps 2, 3 or 5.
 
 ### 1. State the question
 
@@ -120,9 +120,8 @@ codesweep --root /abs/path/to/repo census <sweep-name> \
   --question "..."
 ```
 
-Always pass `--root`. The ledger lives at `<root>/.codesweep/ledger.db`, and
-without `--root` it lands wherever the working directory happens to be. A
-relative `--scope` resolves against `--root`, not against the working directory.
+Always pass `--root`. It names the repository being swept, and a relative
+`--scope` resolves against it rather than against the working directory.
 
 **Read the census output before judging anything.** It reports the site count,
 and it warns under `WARNING_uncovered_extensions` when the scope contains source
@@ -133,7 +132,31 @@ narrow the scope. Never judge a single site while that warning stands.
 Report the site count to the operator. If it is far larger than expected, refine
 the rule now, not after spending the judgements.
 
-### 5. Drain the queue
+The index lives in a per-session temporary directory, never in the repository.
+It is rebuilt by every census, so it cannot go stale and there is nothing to
+refresh. It disappears with the session. Nothing you run leaves state behind in
+the operator's repo.
+
+### 5. Take the manifest, before judging anything
+
+```bash
+codesweep --root /abs/path/to/repo manifest <sweep-name>
+```
+
+This lists every candidate as one line, grouped under its file. Do this
+immediately after the census and before any judging, because it is what makes
+the sweep citable: the identifiers enter the conversation as a fixed set you can
+refer back to for the rest of the session, rather than a number you have to
+remember.
+
+A few dozen sites costs a few kilobytes. Use `--file <path>` to read a large
+sweep in parts, and `--unjudged` to see what is left. The index holds the
+complete record either way, so a partial listing loses nothing.
+
+If the conversation is compacted and the manifest scrolls out of context, run it
+again. The index is still there and the site ids are unchanged.
+
+### 6. Drain the queue
 
 ```bash
 codesweep --root /abs/path/to/repo next <sweep-name> --limit 15
@@ -177,7 +200,7 @@ Loop `next` then `verdict` until `next` returns no sites. This is the part that
 takes real work. Do not stop early and do not summarise from the sites you
 happened to see.
 
-### 6. Report
+### 7. Report
 
 ```bash
 codesweep --root /abs/path/to/repo status <sweep-name>
@@ -197,7 +220,8 @@ to rules X and Y."**
 
 You may not say "audit complete", "no violations found", "the codebase is clean",
 or "I checked everywhere" without a `status` output showing `unjudged: 0` **and**
-a census with no uncovered-extension warning. If either fails, the finding is
+a census with no uncovered-extension warning. Run `status` to check rather than
+counting from memory; that is what it is for. If either fails, the finding is
 partial and you must say so with the number.
 
 The completeness claim is always relative to the census rules and to syntax.
@@ -218,12 +242,9 @@ So a re-audit after a small change costs a handful of judgements rather than the
 whole sweep. The output names `sites_new` and `sites_departed` so you can see
 what moved.
 
-**Decide with the operator whether `.codesweep/` is committed.** Committing it
-shares the verdicts, so a teammate or a later session re-censuses cheaply instead
-of paying for the whole sweep again. Leaving it untracked means the verdicts are
-yours alone and the next person starts from zero. Either is defensible. Silence
-means it sits untracked and un-gitignored in their repository, which is the one
-outcome nobody chose.
+Verdicts last as long as the session and no longer. There is nothing to commit
+and nothing to clean up. If the work needs to outlive the session, write the
+report to a file, which is the artefact a person can read anyway.
 
 ## Driving a refactor
 
@@ -257,6 +278,8 @@ configuration so that claim becomes a gate rather than a memory.
   broken rule.
 - **Trusting a rule that returned a plausible number.** Plausible is what a
   missing language looks like. Only the independent count catches it.
+- **Judging without taking the manifest first.** Without it the candidate set is
+  a number you are holding in your head, which is the habit this replaces.
 
 ## Requirements
 

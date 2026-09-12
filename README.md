@@ -40,23 +40,48 @@ codesweep status my-audit                 # coverage arithmetic
 codesweep report my-audit -o audit.md
 ```
 
-Pass `--root` on every call; the ledger lives at `<root>/.codesweep/ledger.db`
-and a relative `--scope` resolves against it, never against the working
-directory.
+Pass `--root` on every call. It names the repository being swept, and a relative
+`--scope` resolves against it rather than against the working directory.
 
 Verdicts are `violation`, `pass` or `na`. A verdict without a note is refused,
 because a verdict without a reason is not a judgement.
 
-## Re-auditing is cheap
+## Where the index lives, and for how long
+
+In a per-session temporary directory keyed by `CLAUDE_CODE_SESSION_ID`, never in
+the repository being swept. Set `CODESWEEP_SESSION_ID` to run outside a session.
+With neither, codesweep refuses rather than falling back to a shared location,
+because two unrelated runs sharing one index would silently merge their
+candidate sets.
+
+Nothing is left in your repository and nothing survives the session. A census
+rebuilds the index in a fraction of a second, so there is nothing worth keeping
+and nothing that can go stale. Abandoned session directories are removed by age
+on a later run.
+
+Two sessions cannot collide, because each has its own index. Were results ever
+merged they would be additive rather than conflicting, since a site's identity is
+content-addressed: the same code yields the same id whoever enumerated it.
+
+## Re-auditing within a session is cheap
 
 Re-run `census` with the same sweep name. A site whose code is unchanged keeps
 its verdict. A site whose code changed comes back as new and unjudged. A site
 that disappeared is marked gone and leaves the arithmetic.
 
 A site's identity is its rule, its file and its code with whitespace collapsed,
-so reformatting does not invalidate a verdict but a real edit does. That is what
-makes a standing audit affordable: after a small change you re-judge a handful of
-sites, not the whole codebase.
+so reformatting does not invalidate a verdict but a real edit does.
+
+## The manifest is the citable record
+
+`census` returns counts. `manifest` returns every candidate as one line grouped
+under its file, which is what puts a stable identifier for each site into the
+conversation. Roughly 56 bytes per site measured against a real sweep, so a few
+dozen sites costs a few kilobytes.
+
+Take it immediately after the census. If the conversation is compacted and the
+listing scrolls away, run it again; the index is still there and the ids are
+unchanged.
 
 ## Three limits, stated plainly
 
@@ -112,13 +137,24 @@ The first version of this tool would have called that audit complete.
 ## Tests
 
 ```sh
-tests/test_codesweep.sh
+tests/run-all.sh
 ```
 
-36 assertions over a fixture with a hand-counted number of sites, covering
-enumeration, rule narrowing, refused empty notes, refused unknown site ids,
-coverage arithmetic, verdict survival across reformatting, re-judging after a
-real edit, site departure on file deletion, the uncovered-language guard firing
-on a `.tsx` file and clearing when a `tsx` rule is added, relative scope
-resolving against `--root` rather than the working directory, and the coverage
-claim in the report.
+**`tests/test_codesweep.sh`**, 58 assertions against a fixture with a
+hand-counted number of sites. Enumeration, rule narrowing, refused empty notes,
+refused unknown site ids, coverage arithmetic, verdict survival across
+reformatting, re-judging after a real edit, site departure on file deletion, the
+uncovered-language guard firing on a `.tsx` file and clearing when a `tsx` rule
+is added, relative scope resolution, the manifest matching the census count, a
+run with no session being refused, a session id that could escape the temp root
+being refused, and stale session directories being cleaned by age.
+
+**`tests/test_against_ceetrix.sh`**, 18 assertions against a real monorepo. A
+fixture proves the mechanism but cannot prove the tool survives mixed languages,
+generated files, vendored bundles and a `.gitignore` that matters. None of these
+assertions freeze a count, because the repository changes daily and a frozen
+count would fail for the wrong reason and then get deleted. Each is either an
+invariant that holds whatever the repository contains, such as the `typescript`
+and `tsx` counts summing exactly to the combined count, or a cross-check against
+ripgrep as an independent oracle. It skips cleanly when no checkout is present;
+point `CEETRIX_REPO` at one to run it.

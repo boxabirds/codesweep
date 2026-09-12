@@ -22,8 +22,17 @@ check() {
 
 jqp() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 
+# Every run gets its own session id so the index lands in a directory no other
+# run touches, and so a failed run leaves nothing that a later run inherits.
+export CODESWEEP_SESSION_ID="test-$$-$(date +%s)"
+SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "codesweep", os.environ["CODESWEEP_SESSION_ID"]))')"
+
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+cleanup() {
+  rm -rf "$WORK"
+  rm -rf "$SESSION_DIR"
+}
+trap cleanup EXIT
 mkdir -p "$WORK/src"
 
 # Fixture: 3 catch clauses. Two swallow, one rethrows.
@@ -216,6 +225,65 @@ check "report states the syntactic limit" "True" "$(printf '%s' "$REPORT" | grep
 echo "an incomplete sweep says so in its report"
 INCOMPLETE=$("$CODESWEEP" --root "$WORK" report narrow)
 check "incomplete report warns" "True" "$(printf '%s' "$INCOMPLETE" | grep -q 'INCOMPLETE' && echo True || echo False)"
+
+echo "the index lives in a session temp directory, never in the repository"
+check "no .codesweep in the swept repo" "False" "$([ -e "$WORK/.codesweep" ] && echo True || echo False)"
+check "index is under the session dir"  "True"  "$(ls "$SESSION_DIR"/*.db >/dev/null 2>&1 && echo True || echo False)"
+check "index is named for the repo"     "True"  "$(ls "$SESSION_DIR" | grep -qE '^[A-Za-z0-9_-]+-[0-9a-f]{8}\.db$' && echo True || echo False)"
+
+echo "two roots in one session get separate indexes"
+WORK2="$(mktemp -d)"; mkdir -p "$WORK2/src"; cp "$WORK/src/a.ts" "$WORK2/src/a.ts"
+"$CODESWEEP" --root "$WORK2" census other --rule "$WORK/catch.yml" --scope "$WORK2/src" \
+  --question "Does this catch clause hide a failure from the caller?" >/dev/null
+check "two databases in one session" 2 "$(ls "$SESSION_DIR"/*.db | wc -l | tr -d ' ')"
+check "the other root sees only its own sweeps" "other" "$("$CODESWEEP" --root "$WORK2" list | jqp 'd[0]["sweep"]')"
+rm -rf "$WORK2"
+
+echo "a run with no session at all is refused, not silently shared"
+env -u CODESWEEP_SESSION_ID -u CLAUDE_CODE_SESSION_ID "$CODESWEEP" --root "$WORK" list >/dev/null 2>&1
+check "exit code with no session" 1 "$?"
+NOSESS=$(env -u CODESWEEP_SESSION_ID -u CLAUDE_CODE_SESSION_ID "$CODESWEEP" --root "$WORK" list 2>&1)
+check "the refusal names the override" "True" "$(printf '%s' "$NOSESS" | grep -q 'CODESWEEP_SESSION_ID' && echo True || echo False)"
+
+echo "a session id that could climb out of the temp root is refused"
+CODESWEEP_SESSION_ID="../../etc" "$CODESWEEP" --root "$WORK" list >/dev/null 2>&1
+check "exit code for traversal attempt" 1 "$?"
+
+echo "manifest lists every live site, and its count matches the census"
+# A second file with a different number of catch clauses, so that filtering the
+# manifest to one file is a real test rather than a restatement of the total.
+cat > "$WORK/src/c.ts" <<'EOF'
+export function one(x: string) {
+  try { return JSON.parse(x); } catch (e) { return null; }
+}
+EOF
+SITES=$("$CODESWEEP" --root "$WORK" census all --rule "$WORK/catch.yml" --scope "$WORK/src" | jqp 'd["sites_found"]')
+MAN=$("$CODESWEEP" --root "$WORK" manifest all)
+check "manifest rows equal census count" "$SITES" "$(printf '%s\n' "$MAN" | grep -cE '^  [0-9a-f]{16}  ')"
+check "manifest states the total"  "True" "$(printf '%s' "$MAN" | grep -q "of $SITES live sites" && echo True || echo False)"
+check "manifest names its rules"   "True" "$(printf '%s' "$MAN" | grep -q 'rules: ts-catch' && echo True || echo False)"
+check "manifest states the syntactic limit" "True" "$(printf '%s' "$MAN" | grep -q 'never a candidate' && echo True || echo False)"
+check "manifest groups under files" "True" "$(printf '%s' "$MAN" | grep -q '^src/a.ts$' && echo True || echo False)"
+
+echo "manifest can be scoped to one file"
+# a.ts holds two catch clauses, c.ts holds one, so the two filters must differ
+# from each other and from the total of three.
+check "a.ts has two"        2 "$("$CODESWEEP" --root "$WORK" manifest all --file src/a.ts | grep -cE '^  [0-9a-f]{16}  ')"
+check "c.ts has one"        1 "$("$CODESWEEP" --root "$WORK" manifest all --file src/c.ts | grep -cE '^  [0-9a-f]{16}  ')"
+check "the two sum to all"  "$SITES" 3
+"$CODESWEEP" --root "$WORK" manifest all --file src/nope.ts >/dev/null 2>&1
+check "unknown file is refused" 1 "$?"
+
+echo "manifest can list only what is still unjudged"
+check "unjudged count" "$("$CODESWEEP" --root "$WORK" status all | jqp 'd["coverage"]["unjudged"]')" \
+  "$("$CODESWEEP" --root "$WORK" manifest all --unjudged | grep -cE '^  [0-9a-f]{16}  ')"
+
+echo "a stale session directory is removed by a later census"
+STALE="$(dirname "$SESSION_DIR")/test-stale-$$"
+mkdir -p "$STALE" && touch -t 202001010000 "$STALE"
+"$CODESWEEP" --root "$WORK" census all --rule "$WORK/catch.yml" --scope "$WORK/src" >/dev/null
+check "stale session removed" "False" "$([ -d "$STALE" ] && echo True || echo False)"
+check "this session survived"  "True" "$([ -d "$SESSION_DIR" ] && echo True || echo False)"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]

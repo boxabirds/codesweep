@@ -28,20 +28,33 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import tempfile
 import textwrap
+import time
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# The index lives in a per-session temporary directory, never in the repository
+# being swept. A census rebuilds it in a fraction of a second, so there is
+# nothing worth persisting across sessions and nothing that can go stale.
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+# Set this to run outside a Claude Code session, for example from a test
+# harness or a shell. Naming it explicitly keeps the absence of a session an
+# error rather than a silent fallback to a shared location.
+SESSION_ENV_OVERRIDE = "CODESWEEP_SESSION_ID"
+
+TEMP_NAMESPACE = "codesweep"
+
+# How long an abandoned session's index survives before a later run removes it.
+# Sessions end without notice, so cleanup is by age rather than teardown.
+SESSION_RETENTION_SECONDS = 7 * 24 * 60 * 60
 
 # Site ids are truncated sha256. 16 hex chars = 64 bits, which keeps collision
 # probability negligible for the site counts a single repo produces while staying
 # short enough for an agent to pass around in a JSON payload.
 SITE_ID_HEX_CHARS = 16
-
-# How much of a matched node to keep in the ledger. Long matches (a whole class)
-# would otherwise bloat the database; the full text is always re-readable from
-# disk via the recorded line range.
-MAX_EXCERPT_CHARS = 2000
 
 # Lines of surrounding source handed to the agent with each site to judge.
 DEFAULT_CONTEXT_LINES = 8
@@ -115,8 +128,79 @@ def die(msg: str, code: int = 1):
 # ---------------------------------------------------------------- storage
 
 
+def session_id() -> str:
+    """The Claude Code session this run belongs to.
+
+    Present in the environment of every Bash tool call. When it is absent the
+    run is not inside a session, and there is no safe shared location to guess
+    at: two unrelated runs sharing one database would silently merge their
+    candidate sets. Refuse rather than fall back.
+    """
+    # The override wins. It is set deliberately, by a test harness or a shell,
+    # whereas the session variable is ambient. Checking the ambient one first
+    # would make the override silently useless inside a session, which is
+    # exactly where tests run.
+    value = os.environ.get(SESSION_ENV_OVERRIDE) or os.environ.get(SESSION_ENV)
+    if not value:
+        die(
+            f"{SESSION_ENV} is not set, so this run cannot be tied to a session. "
+            "codesweep keeps its index in a per-session temporary directory and "
+            "will not fall back to a shared one. Set "
+            f"{SESSION_ENV_OVERRIDE} explicitly to run outside a session."
+        )
+    # The value reaches a filesystem path, so refuse anything that could climb
+    # out of the temp root rather than sanitising it into something unexpected.
+    if not all(c.isalnum() or c in "-_" for c in value):
+        die(f"{SESSION_ENV} contains characters that cannot form a directory name")
+    return value
+
+
+def repo_slug(root: str) -> str:
+    """A filename identifying one repository, so a session can sweep several."""
+    base = os.path.basename(os.path.abspath(root)) or "root"
+    digest = hashlib.sha256(os.path.abspath(root).encode()).hexdigest()[:8]
+    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in base)
+    return f"{safe}-{digest}"
+
+
+def session_dir() -> str:
+    return os.path.join(tempfile.gettempdir(), TEMP_NAMESPACE, session_id())
+
+
 def ledger_path(root: str) -> str:
-    return os.path.join(root, ".codesweep", "ledger.db")
+    """Where this session's index lives.
+
+    Deliberately not inside the repository. The index is rebuilt by every
+    census, so it is never older than the census that made it and has no
+    staleness to refresh. Keeping it in the repository would leave an untracked
+    directory behind and invite exactly the stale-verdict problem the session
+    lifetime removes.
+    """
+    return os.path.join(session_dir(), f"{repo_slug(root)}.db")
+
+
+def sweep_stale_sessions():
+    """Remove session directories older than the retention window.
+
+    Sessions end without telling anyone, so cleanup is by age on each run
+    rather than by an explicit teardown. Failures here are ignored: another
+    session may be removing the same directory concurrently, and losing a
+    cleanup pass is harmless while crashing a sweep over one is not.
+    """
+    root = os.path.join(tempfile.gettempdir(), TEMP_NAMESPACE)
+    if not os.path.isdir(root):
+        return
+    cutoff = time.time() - SESSION_RETENTION_SECONDS
+    mine = session_dir()
+    for name in os.listdir(root):
+        path = os.path.join(root, name)
+        if path == mine or not os.path.isdir(path):
+            continue
+        try:
+            if os.path.getmtime(path) < cutoff:
+                shutil.rmtree(path, ignore_errors=True)
+        except OSError:
+            continue
 
 
 def connect(root: str, create: bool = False) -> sqlite3.Connection:
@@ -165,7 +249,6 @@ def connect(root: str, create: bool = False) -> sqlite3.Connection:
             start_line INTEGER NOT NULL,
             end_line   INTEGER NOT NULL,
             ordinal    INTEGER NOT NULL,
-            excerpt    TEXT NOT NULL,
             state      TEXT NOT NULL,
             first_seen TEXT NOT NULL,
             last_seen  TEXT NOT NULL,
@@ -325,6 +408,7 @@ def site_identity(rule_id: str, relfile: str, ordinal: int, text: str) -> str:
 def cmd_census(args):
     root = os.path.abspath(args.root)
     binary = ast_grep_binary()
+    sweep_stale_sessions()
     # A relative scope resolves against --root, never against the current
     # directory. Resolving against the working directory would let the same
     # command sweep a different tree depending on where it was run, and still
@@ -398,7 +482,6 @@ def cmd_census(args):
                 "start_line": rng["start"]["line"] + 1,
                 "end_line": rng["end"]["line"] + 1,
                 "ordinal": ordinal,
-                "excerpt": text[:MAX_EXCERPT_CHARS],
             }
 
     stamp = now()
@@ -419,8 +502,8 @@ def cmd_census(args):
             added += 1
             conn.execute(
                 "INSERT INTO site (sweep, site_id, rule_id, file, start_line, end_line,"
-                " ordinal, excerpt, state, first_seen, last_seen)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                " ordinal, state, first_seen, last_seen)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     args.name,
                     site_id,
@@ -429,7 +512,6 @@ def cmd_census(args):
                     s["start_line"],
                     s["end_line"],
                     s["ordinal"],
-                    s["excerpt"],
                     STATE_LIVE,
                     stamp,
                     stamp,
@@ -437,12 +519,11 @@ def cmd_census(args):
             )
         else:
             conn.execute(
-                "UPDATE site SET start_line = ?, end_line = ?, excerpt = ?,"
+                "UPDATE site SET start_line = ?, end_line = ?,"
                 " state = ?, last_seen = ? WHERE sweep = ? AND site_id = ?",
                 (
                     s["start_line"],
                     s["end_line"],
-                    s["excerpt"],
                     STATE_LIVE,
                     stamp,
                     args.name,
@@ -795,6 +876,83 @@ def cmd_report(args):
         print(text)
 
 
+def cmd_manifest(args):
+    """Emit every site as one line, grouped under its file.
+
+    This is what makes a sweep citable. `census` returns counts, which tell an
+    agent how many sites exist but give it nothing to refer back to. The
+    manifest puts a stable identifier for every candidate into the transcript,
+    so the candidate set stops being something the agent chooses or forgets and
+    becomes text in front of it that it cannot quietly revise.
+
+    Grouping under the file removes the repeated path, which is most of the
+    payload: roughly 28 bytes per site rather than 45.
+
+    Plain text rather than JSON, deliberately. The agent reads this, it does not
+    parse it, and JSON scaffolding would triple the size for no gain.
+    """
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    sweep = require_sweep(conn, args.name)
+
+    query = (
+        "SELECT s.file, s.site_id, s.start_line, s.end_line, s.rule_id,"
+        " v.verdict FROM site s"
+        " LEFT JOIN verdict v ON v.sweep = s.sweep AND v.site_id = s.site_id"
+        " WHERE s.sweep = ? AND s.state = ?"
+    )
+    params = [args.name, STATE_LIVE]
+    if args.file:
+        query += " AND s.file = ?"
+        params.append(args.file)
+    if args.unjudged:
+        query += " AND v.site_id IS NULL"
+    query += " ORDER BY s.file, s.start_line"
+    rows = conn.execute(query, params).fetchall()
+
+    if args.file and not rows:
+        known = conn.execute(
+            "SELECT DISTINCT file FROM site WHERE sweep = ? AND state = ?"
+            " ORDER BY file LIMIT 5",
+            (args.name, STATE_LIVE),
+        ).fetchall()
+        die(
+            f"no sites in {args.file!r} for sweep {args.name!r}. "
+            f"Files in this sweep include: {', '.join(r['file'] for r in known)}"
+        )
+
+    counts = coverage(conn, args.name)
+    rule_ids = sorted({r["rule_id"] for r in rows})
+
+    out = [f"sweep: {args.name}", f"question: {sweep['question']}"]
+    out.append(f"rules: {', '.join(rule_ids) or '(none matched)'}")
+    if args.file:
+        out.append(f"filtered to: {args.file}")
+    if args.unjudged:
+        out.append("filtered to: unjudged only")
+    out.append(
+        f"listed {len(rows)} of {counts['live_sites']} live sites, "
+        f"{counts['unjudged']} unjudged"
+    )
+    out.append("")
+
+    current = None
+    for r in rows:
+        if r["file"] != current:
+            current = r["file"]
+            out.append(current)
+        mark = (r["verdict"] or "-")[:9]
+        out.append(f"  {r['site_id']}  {r['start_line']}-{r['end_line']}  {mark}")
+
+    out.append("")
+    out.append(
+        "Every candidate is listed above. This set is complete with respect to "
+        "the rules named, and to syntax: matching does no scope or type "
+        "analysis, so a site of a different shape was never a candidate."
+    )
+    print("\n".join(out))
+
+
 def cmd_show(args):
     """Re-read one site after it has left the `next` queue.
 
@@ -907,6 +1065,18 @@ def main():
     p.add_argument("name")
     p.add_argument("-o", "--output")
     p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser(
+        "manifest",
+        parents=[root_opt],
+        help="every site as one line, the citable record of the candidate set",
+    )
+    p.add_argument("name")
+    p.add_argument("--file", help="restrict the listing to one file")
+    p.add_argument(
+        "--unjudged", action="store_true", help="list only sites with no verdict"
+    )
+    p.set_defaults(func=cmd_manifest)
 
     p = sub.add_parser("show", parents=[root_opt], help="re-read one site, judged or not, with more context")
     p.add_argument("name")
