@@ -634,12 +634,14 @@ def coverage(conn, name: str) -> dict:
             (name, STATE_LIVE),
         )
     }
-    return {
+    out = {
         "live_sites": live,
         "judged": judged,
         "unjudged": live - judged,
         "by_verdict": by_verdict,
     }
+    out.update(surface_counts(conn, name))
+    return out
 
 
 # ---------------------------------------------------------------- surfaces
@@ -878,6 +880,38 @@ def cmd_surfaces(args):
     print(json.dumps(payload, indent=2))
 
 
+def completeness(counts: dict, uncovered: dict) -> dict:
+    """The single verdict, and every reason it is false.
+
+    Three independent conditions decide whether a sweep can be called complete,
+    and they used to be evaluated in two places with the wording repeated. They
+    live here so the two callers cannot drift apart.
+
+    Every reason is returned, not the first. An implementation that stops at the
+    first failure hands the operator one reason, they fix it, and they walk into
+    the next one.
+    """
+    reasons = []
+    if counts["live_sites"] == 0:
+        reasons.append("no sites were enumerated, so there is nothing to be complete about")
+    if counts["unjudged"]:
+        reasons.append(
+            f"{counts['unjudged']} enumerated sites have no verdict"
+        )
+    if uncovered:
+        kinds = ", ".join(sorted(uncovered))
+        reasons.append(
+            f"the scope holds source no rule can reach ({kinds}), so those files "
+            "were never examined"
+        )
+    if counts.get("surfaces_unexamined"):
+        named = ", ".join(counts["surfaces_unexamined"])
+        reasons.append(
+            f"declared parts of the system have not been examined: {named}"
+        )
+    return {"complete": not reasons, "incomplete_because": reasons}
+
+
 def cmd_status(args):
     root = os.path.abspath(args.root)
     conn = connect(root)
@@ -897,25 +931,25 @@ def cmd_status(args):
         (args.name,),
     ).fetchone()
     uncovered = json.loads(last["uncovered"]) if last else {}
-    print(
-        json.dumps(
-            {
-                "sweep": args.name,
-                "question": sweep["question"],
-                "scope": sweep["scope"],
-                "rules": rules,
-                "last_census": dict(last) if last else None,
-                "uncovered_extensions": uncovered,
-                "coverage": counts,
-                "complete": (
-                    counts["unjudged"] == 0
-                    and counts["live_sites"] > 0
-                    and not uncovered
-                ),
-            },
-            indent=2,
+    verdict = completeness(counts, uncovered)
+    payload = {
+        "sweep": args.name,
+        "question": sweep["question"],
+        "scope": sweep["scope"],
+        "rules": rules,
+        "last_census": dict(last) if last else None,
+        "uncovered_extensions": uncovered,
+        "coverage": counts,
+        "complete": verdict["complete"],
+        "incomplete_because": verdict["incomplete_because"],
+    }
+    if not counts["declared_list"]:
+        payload["surfaces_note"] = (
+            "No parts of the system were declared for this audit, so this claim "
+            "covers the scope the census was given and not the system. Run "
+            "`surfaces <sweep> --propose` to see what is here."
         )
-    )
+    print(json.dumps(payload, indent=2))
 
 
 # ---------------------------------------------------------------- next / verdict
@@ -1067,20 +1101,24 @@ def cmd_report(args):
             "findings as a picture of the scope."
         )
         out.append("")
-    if counts["unjudged"]:
-        out.append(
-            f"> This sweep is INCOMPLETE. {counts['unjudged']} enumerated sites "
-            "have no verdict. Findings below are partial."
-        )
-    elif uncovered:
-        out.append(
-            "> Every site the rules reached carries a verdict. That is a complete "
-            "sweep of the files those rules can parse, not of the scope."
-        )
+    verdict = completeness(counts, uncovered)
+    if not verdict["complete"]:
+        out.append("> This sweep is INCOMPLETE, because:")
+        out.append(">")
+        for reason in verdict["incomplete_because"]:
+            out.append(f"> - {reason}")
+        out.append(">")
+        out.append("> Findings below are partial.")
     else:
         out.append(
             "> Every enumerated site carries a verdict, so this sweep is complete "
             "with respect to the census rules below and nothing else."
+        )
+    if not counts["declared_list"]:
+        out.append(">")
+        out.append(
+            "> No parts of the system were declared for this audit, so the claim "
+            "above covers the scope the census was given rather than the system."
         )
     out.append("")
     out.append("## Census rules")
