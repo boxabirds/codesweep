@@ -24,6 +24,78 @@ one shape at a time, which is the part agents were getting wrong.
 
 The agent never decides what the candidate set is. It only judges what is in it.
 
+## What this is for
+
+Three buckets, because the difference between them decides whether this tool
+helps you or wastes your time.
+
+### Badly served today, or not served at all
+
+**Knowing when you are finished.** Everything else here exists for this. The
+normal way to sweep a codebase is to search, fix what you find, search again
+with a different pattern, and stop when nothing new turns up. That stopping
+point is a statement about running out of ideas, not about the codebase running
+out of instances. codesweep fixes the candidate set before any judging starts,
+so what is left is subtraction.
+
+**A candidate set you can cite.** After a sweep there is a list of every site,
+each with a stable id, and a report that reproduces the rules that produced it.
+Six months later you can re-run the same rule and diff. "We checked" becomes a
+number and a manifest.
+
+**Picking up a half-finished audit.** Verdicts are recorded per site as you go,
+so a sweep interrupted by anything at all resumes where it stopped. A site whose
+code changed since you judged it comes back as new; one whose formatting changed
+does not.
+
+**Noticing a whole file type was never looked at.** The failure this product was
+built after: a rule declaring one language silently skips every file of its
+sibling language, the queue drains, and the report is clean because half the
+codebase was never opened. The census now reports every source extension in
+scope that no rule can reach, and refuses to call the sweep complete while any
+remain.
+
+### Improved
+
+**Finding every instance of a syntactic shape.** Text search does this badly and
+the failure is quiet in both directions. Measured on a file containing three
+catch clauses: a careful regular expression, the kind a person actually writes,
+found one of the three. A naive one found all three plus a comment and a string.
+AST matching found exactly three.
+
+**Auditing against a project convention.** Every hardcoded colour, every
+swallowed error, every use of a deprecated thing. The census gives you the
+denominator and the ledger keeps your judgements.
+
+**Checking that a past change landed everywhere.** Same rule, run again, diff
+the manifest.
+
+How much better than a capable agent doing the same job by hand is not yet
+measured. A suite that runs each question with and without the tool and reports
+the difference is being built; until it has run, treat the improvement here as
+argued rather than demonstrated.
+
+### Out of scope, by design
+
+**Anything that depends on which declaration a name refers to.** Renaming a
+method, finding every caller, working out what breaks if you delete a class.
+Matching is syntactic. Given a top-level `save()`, a shadowed local `save()` and
+`obj.save()`, a pattern matches the first two identically and misses the third.
+This is not a gap to be closed with a better rule; it needs a compiler or a
+language server, and you should use one.
+
+**One literal with one spelling.** If the answer is exact from a single search,
+take the single search. Enumeration machinery buys you nothing here and makes it
+less credible when you genuinely need it.
+
+**Whether the findings are right.** A correct denominator is not correct
+answers. Semgrep ran a tuned LLM judge over a provably complete finding set and
+reached 96% agreement with human triage on true positives and 41% on false
+positives. Expect a second failure mode after this one is gone, and treat a
+`pass` as weaker evidence than a `violation`.
+
+**Reading a file, or exploring.** Not what this is.
+
 ## Install
 
 ```sh
