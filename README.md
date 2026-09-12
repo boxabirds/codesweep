@@ -1,3 +1,5 @@
+<img src="assets/icon.png" alt="codesweep" width="120" align="right">
+
 # codesweep
 
 A coding agent asked to audit a codebase picks which files to read. So the
