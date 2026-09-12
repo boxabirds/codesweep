@@ -20,6 +20,10 @@ ast-grep-config = "0.45.3"
 rusqlite = { version = "0.32", features = ["bundled"] }
 sha2 = "0.10"
 
+# The walker ripgrep uses. It applies the ignore files a repository already
+# has, rather than asking another program which files exist.
+ignore = "0.4"
+
 # The language set is chosen here rather than at runtime, so an unsupported
 # language is a fact the compiler knows. It is every language the Python tool
 # claims, minus scss: the crate has no scss grammar, and the CSS grammar parses

@@ -794,6 +794,7 @@ dependencies = [
  "ast-grep-config",
  "ast-grep-core",
  "ast-grep-language",
+ "ignore",
  "rusqlite",
  "serde_json",
  "sha2",

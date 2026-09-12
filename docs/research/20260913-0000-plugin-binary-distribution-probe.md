@@ -121,3 +121,39 @@ The plugin is not the delivery channel for the build. Three shapes remain:
 
 The port itself is unaffected: all three consume the same binary. What changes is
 what `install.sh` and the skill guidance say, which is task 8.7.
+
+---
+
+# Addendum: the shipped tool's denominator does not match its own census
+
+Found on 13 September 2026 while comparing the port's file walker against the
+list the Python tool uses, on a real monorepo.
+
+`bin/resweep` asks version control for its file list, with
+`git ls-files --cached --others --exclude-standard`. That list is what the
+uncovered-extension warning and the surface proposal are computed from. The
+census itself does not use it: ast-grep walks the scope on its own, applying the
+repository's ignore files.
+
+On a monorepo containing a submodule the two disagree completely. Version
+control reports the submodule as one entry and never its contents. ast-grep
+descends into it: measured with `rules/ts-catch-clause.yml` against
+`packages/ceetrix-cli`, it finds thirty-six sites across fourteen files that the
+tool's own file list does not contain.
+
+So the tool counts sites in files its extension check cannot see and its surface
+proposal will never suggest. The warning that says which extensions no rule
+covers is computed over a smaller set of files than the census ran on, which is
+the one direction that cannot be argued away: the warning exists to say what was
+missed, and it is blind to a whole package.
+
+The port removes this by using one walker for both, and that walker is the one
+ast-grep itself uses. Two smaller differences were measured and accepted at the
+same time: a tracked file that an ignore rule excludes, which the walker drops
+and ast-grep also drops, and a symlink, which version control lists and neither
+the walker nor ast-grep follows.
+
+None of this is fixed in `bin/resweep`. It is a Python tool with a Rust
+replacement in progress, and splitting the fix across both would mean doing it
+twice. The comparison lives in `crates/resweep/tests/discovery_against_git.rs`,
+which fails on any difference that has not been written down.
