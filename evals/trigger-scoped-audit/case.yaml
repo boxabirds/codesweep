@@ -1,0 +1,26 @@
+schema_version: "1.0"
+name: trigger-scoped-audit
+runs: 1
+context:
+  scaffold_script: ../fixture/axios.sh
+execution:
+  max_turns: 40
+  allowed_tools: [Read, Glob, Grep, Skill, Bash]
+  prompt: "In lib/, which catch blocks swallow the error so the caller cannot see it?"
+graders:
+  - type: llm
+    name: outcome
+    weight: 1
+    criteria: |
+      The answer treats this as a question whose value is a complete set rather
+      than a sample. It states how many catch blocks were in scope and how many
+      of those swallow the error, and the two numbers are consistent with each
+      other.
+
+      Fails if the answer offers a few examples and stops, or reports findings
+      with no denominator, so that a reader cannot tell what fraction of the
+      directory was examined.
+  - type: tool_used
+    name: trigger
+    tool: Skill
+    min: 1
