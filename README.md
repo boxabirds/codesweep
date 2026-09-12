@@ -27,13 +27,151 @@ Requires `ast-grep` on PATH and Python 3.9+. No Python dependencies.
 
 ```sh
 brew install ast-grep
-ln -s "$PWD/bin/codesweep" /usr/local/bin/codesweep
+ln -s "$PWD/bin/codesweep" /usr/local/bin/codesweep   # or anywhere on PATH
+ln -s "$PWD/skills/codesweep" ~/.claude/skills/codesweep
 ```
 
-For Claude Code, copy `skills/codesweep` into `~/.claude/skills/` or install
-this directory as a plugin with `claude --plugin-dir .`.
+The second link is what matters: an agent reaches this through the skill, and
+the skill drives the CLI. Installing the directory as a plugin with
+`claude --plugin-dir .` works too. A skill installed at user level is available
+in every project, and Claude Code picks it up without a restart, though sessions
+already running will not see it until they are restarted.
 
-## Use
+## Using it as a skill
+
+This is mostly not something you type. It is a skill an agent invokes when it
+realises it needs to look for something that could be anywhere, and the agent
+then drives the CLI itself.
+
+You do not name it. Claude Code injects the skill's description into a listing
+and the model decides, so the description is the trigger. Those below were
+measured, not guessed: a fresh agent was given the description alone and asked,
+for each prompt, whether it would invoke the skill first. The wording was
+revised over five rounds against the results.
+
+**Fires.** The shared property is that the answer is a set whose size has to be
+right, not a location.
+
+- find every place we hardcode a colour instead of using a palette token
+- audit every catch clause in workers/taskmgr for silent fallbacks
+- which agent-facing strings are hardcoded instead of going through getPrompt()
+- are we still using the deprecated toast component anywhere
+- we need to remove all silent fallbacks before launch, where are they
+- migrate every rgba(255,255,255,x) to a palette token
+
+Note the third and fourth carry no "every" or "all". A plural question about
+rule violations wants the whole set, and the description says so explicitly,
+because without that clause it fired only by luck.
+
+**Does not fire, correctly.**
+
+- read the deploy script and tell me what it does — one file
+- what does the taskmgr worker do — open-ended, no condition to match
+- how many times do we call console.log in workers/admin — one literal string,
+  one pattern, so a plain `grep -c` answers it exactly
+- rename getPrompt to loadPrompt everywhere — a refactor touching every site,
+  but it needs symbol resolution
+- find all callers of createProject — same
+- find everything that would break if I delete the LimitExceededError class —
+  same
+
+The last three are the important exclusions. They look exactly like sweeps and
+they are the cases ast-grep cannot serve, because it does no scope or type
+analysis and cannot tell one `save` from another `save` in a different scope.
+That needs a language server. Before the description said so, renames fired.
+
+You can still force it with `/codesweep`, or skip the skill and drive the CLI
+yourself.
+
+## What the agent sees
+
+A real sweep of the Ceetrix admin worker, abbreviated only where marked.
+
+**Census** enumerates. The count is the denominator, and nothing about it is the
+agent's to choose.
+
+```json
+{
+  "sweep": "swallowed",
+  "rules": ["ts-catch-clause", "tsx-catch-clause"],
+  "rule_languages": ["tsx", "typescript"],
+  "sites_found": 56,
+  "sites_new": 56,
+  "unjudged": 56,
+  "file_discovery": "git",
+  "WARNING_uncovered_extensions": { ".css": 1, ".html": 1 },
+  "WARNING": "The scope contains source files with extensions that NO census rule covers, so those files were never examined and cannot appear in the report. ..."
+}
+```
+
+That warning is the guard against the failure this tool exists to prevent. Here
+it is benign, naming a stylesheet and an HTML file a catch-clause rule was never
+going to match. Run the same census with only the `typescript` rule and it names
+27 `.tsx` files instead, which is how a sweep returns 22 sites, reports
+`unjudged: 0`, and finds nothing while every real violation sits in the files it
+never opened.
+
+**Manifest** is the citable record, and the step that makes the sweep referable
+later in the conversation. One line per site, grouped under its file.
+
+```
+sweep: swallowed
+question: Does this catch clause swallow a failure the caller needed to see?
+rules: ts-catch-clause, tsx-catch-clause
+listed 56 of 56 live sites, 55 unjudged
+
+workers/admin/src/frontend/components/CreatePlanModal.tsx
+  3549d1f2cfe0228d  151-153  pass
+workers/admin/src/frontend/components/DiffModal.tsx
+  c89323d99c256c1e  99-102  -
+  2c8e026cdc52812a  118-122  -
+```
+
+Roughly 56 bytes per site, so a sweep this size costs about 3KB to hold in
+context for the rest of the session. The trailing column is the verdict, or `-`
+where none has been given.
+
+If the conversation is compacted and the listing scrolls out of context, run it
+again. The index outlives the context window and the site ids do not change.
+
+**Next** hands out a batch with surrounding source, the matched lines marked
+with `>`.
+
+```
+>   151 |     } catch (err) {
+>   152 |       setErrors({ submit: err instanceof Error ? err.message : 'Failed to create plan' });
+>   153 |     } finally {
+    154 |       setIsSubmitting(false);
+```
+
+The context is a starting point, not the evidence. Eight lines cannot tell you
+whether an error state is ever rendered, so a judging agent reads the file when
+the excerpt does not settle it. An independent evaluation of this skill found
+the agent opening a dozen files beyond the excerpts across 56 sites.
+
+**Verdict** records one judgement per site. An empty note is refused, because a
+verdict without a reason is not a judgement.
+
+**Status** is the arithmetic, and it is what gates the completeness claim.
+
+```json
+{
+  "coverage": { "live_sites": 56, "judged": 1, "unjudged": 55, "by_verdict": { "pass": 1 } },
+  "uncovered_extensions": { ".css": 1, ".html": 1 },
+  "complete": false
+}
+```
+
+`complete` is false here for two independent reasons: sites remain unjudged, and
+part of the scope was unreachable by any rule. Either alone is enough. The skill
+forbids claiming an audit is done while this says otherwise, which converts a
+claim the agent would otherwise make from memory into one it has to check.
+
+**Report** renders the findings as markdown, reproducing each census rule in
+full so the completeness claim stays checkable after the rule files have moved.
+See `examples/` for two real ones.
+
+## Driving the CLI directly
 
 ```sh
 codesweep census my-audit --rule rules/css-literal-colour.yml --scope src \
@@ -77,17 +215,6 @@ that disappeared is marked gone and leaves the arithmetic.
 
 A site's identity is its rule, its file and its code with whitespace collapsed,
 so reformatting does not invalidate a verdict but a real edit does.
-
-## The manifest is the citable record
-
-`census` returns counts. `manifest` returns every candidate as one line grouped
-under its file, which is what puts a stable identifier for each site into the
-conversation. Roughly 56 bytes per site measured against a real sweep, so a few
-dozen sites costs a few kilobytes.
-
-Take it immediately after the census. If the conversation is compacted and the
-listing scrolls away, run it again; the index is still there and the ids are
-unchanged.
 
 ## Three limits, stated plainly
 
