@@ -2,7 +2,7 @@ schema_version: "1.0"
 name: trigger-scoped-audit
 runs: 1
 context:
-  scaffold_script: ../fixture/axios.sh
+  scaffold_script: scaffold.sh
 execution:
   max_turns: 40
   allowed_tools: [Read, Glob, Grep, Skill, Bash]
