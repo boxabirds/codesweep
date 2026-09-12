@@ -95,93 +95,125 @@ That needs a language server. Before the description said so, renames fired.
 You can still force it with `/codesweep`, or skip the skill and drive the CLI
 yourself.
 
-## What the agent sees
+## User journey
 
-A real sweep of the Ceetrix admin worker, abbreviated only where marked.
+A real run, start to finish, against axios 1.13.2 at `8092aee`. Every number and
+quote below came from executing it, not from writing what it would look like.
 
-**Census** enumerates. The count is the denominator, and nothing about it is the
-agent's to choose.
+### 1. Install
 
-```json
-{
-  "sweep": "swallowed",
-  "rules": ["ts-catch-clause", "tsx-catch-clause"],
-  "rule_languages": ["tsx", "typescript"],
-  "sites_found": 56,
-  "sites_new": 56,
-  "unjudged": 56,
-  "file_discovery": "git",
-  "WARNING_uncovered_extensions": { ".css": 1, ".html": 1 },
-  "WARNING": "The scope contains source files with extensions that NO census rule covers, so those files were never examined and cannot appear in the report. ..."
-}
+`./install.sh`, as above. Once, not per project.
+
+### 2. Ask a question in Claude Code
+
+> does axios swallow any errors in a way callers cannot see?
+
+You do not name the skill. The description is in the skill listing, the model
+recognises the shape of the question, and invokes it.
+
+### 3. The agent writes a rule, and proves it
+
+```yaml
+id: js-catch-clause
+language: javascript
+rule:
+  kind: catch_clause
 ```
 
-That warning is the guard against the failure this tool exists to prevent. Here
-it is benign, naming a stylesheet and an HTML file a catch-clause rule was never
-going to match. Run the same census with only the `typescript` rule and it names
-27 `.tsx` files instead, which is how a sweep returns 22 sites, reports
-`unjudged: 0`, and finds nothing while every real violation sits in the files it
-never opened.
+Deliberately dumb: it selects candidates, it decides nothing. Then the
+cross-check the skill insists on. Ripgrep counted 19 catch lines in `lib/`,
+codesweep found 18.
 
-**Manifest** is the citable record, and the step that makes the sweep referable
-later in the conversation. One line per site, grouped under its file.
+That gap is not waved through. The extra line was
+`asyncExecutor(...).catch(_reject)`, a promise method that matches the regex and
+is not a catch clause. The AST count was right and the text search over-counted.
+A disagreement in the other direction would have meant a broken rule.
+
+### 4. Census
+
+```
+sites: 18 | uncovered: none
+```
+
+0.24 seconds. `uncovered: none` means every source file in scope was reachable
+by a rule. When it is not, the census says so loudly and `status` refuses to
+report complete. That guard exists because the rule originally shipped with this
+skill declared `language: typescript`, which silently skips every `.tsx` file: on
+a React codebase it enumerated 22 sites, reported `unjudged: 0`, and found
+nothing, while all the real violations sat in the files it never opened.
+
+### 5. Manifest
 
 ```
 sweep: swallowed
-question: Does this catch clause swallow a failure the caller needed to see?
-rules: ts-catch-clause, tsx-catch-clause
-listed 56 of 56 live sites, 55 unjudged
+question: Does this catch clause hide a failure from the caller?
+rules: js-catch-clause
+listed 18 of 18 live sites, 18 unjudged
 
-workers/admin/src/frontend/components/CreatePlanModal.tsx
-  3549d1f2cfe0228d  151-153  pass
-workers/admin/src/frontend/components/DiffModal.tsx
-  c89323d99c256c1e  99-102  -
-  2c8e026cdc52812a  118-122  -
+lib/adapters/adapters.js
+  7df0d8bd7bc1ff56  29-31  -
+lib/adapters/fetch.js
+  e1950380ee0be71c  27-29  -
+  9235a9942ed29d2d  245-258  -
 ```
 
-Roughly 56 bytes per site, so a sweep this size costs about 3KB to hold in
-context for the rest of the session. The trailing column is the verdict, or `-`
-where none has been given.
+1,092 bytes for the whole set. This is the candidate list entering the
+conversation as something the agent can cite for the rest of the session, rather
+than a count it has to remember.
 
-If the conversation is compacted and the listing scrolls out of context, run it
-again. The index outlives the context window and the site ids do not change.
+### 6. Judging, which is the part that costs real work
 
-**Next** hands out a batch with surrounding source, the matched lines marked
-with `>`.
+`next` hands out batches with surrounding source, matched lines marked `>`. The
+excerpt is a starting point, not the evidence. One site here could not be settled
+from eight lines of context, so the agent read `lib/core/Axios.js` and then
+`lib/core/InterceptorManager.js` to answer it. The skill tells it to do exactly
+that.
 
-```
->   151 |     } catch (err) {
->   152 |       setErrors({ submit: err instanceof Error ? err.message : 'Failed to create plan' });
->   153 |     } finally {
-    154 |       setIsSubmitting(false);
-```
+Every verdict needs a note. An empty one is refused, because a verdict without a
+reason is not a judgement.
 
-The context is a starting point, not the evidence. Eight lines cannot tell you
-whether an error state is ever rendered, so a judging agent reads the file when
-the excerpt does not settle it. An independent evaluation of this skill found
-the agent opening a dozen files beyond the excerpts across 56 sites.
-
-**Verdict** records one judgement per site. An empty note is refused, because a
-verdict without a reason is not a judgement.
-
-**Status** is the arithmetic, and it is what gates the completeness claim.
+### 7. Status gates the claim
 
 ```json
-{
-  "coverage": { "live_sites": 56, "judged": 1, "unjudged": 55, "by_verdict": { "pass": 1 } },
-  "uncovered_extensions": { ".css": 1, ".html": 1 },
-  "complete": false
-}
+{ "live_sites": 18, "judged": 18, "unjudged": 0,
+  "by_verdict": { "pass": 16, "violation": 2 }, "complete": true }
 ```
 
-`complete` is false here for two independent reasons: sites remain unjudged, and
-part of the scope was unreachable by any rule. Either alone is enough. The skill
-forbids claiming an audit is done while this says otherwise, which converts a
-claim the agent would otherwise make from memory into one it has to check.
+The skill forbids saying an audit is done while this says otherwise. A claim the
+agent would otherwise make from memory becomes one it has to check.
 
-**Report** renders the findings as markdown, reproducing each census rule in
-full so the completeness claim stays checkable after the rule files have moved.
-See `examples/` for two real ones.
+### The outcome
+
+Two violations in eighteen, and the second is a real bug in axios.
+
+**`lib/core/Axios.js:178`** calls `onRejected.call(this, error)` in the
+synchronous interceptor path. `InterceptorManager.use(fulfilled)` called with a
+single argument stores `rejected: undefined`, which is how most people register
+an interceptor. So a request interceptor that throws, registered without a
+rejection handler, raises `TypeError: Cannot read properties of undefined
+(reading 'call')` and destroys the original error. Both halves verified in the
+source.
+
+**`lib/adapters/http.js:359`** catches a throw from `abortEmitter.emit`, writes
+`console.warn`, and continues. Remaining abort listeners never run, and the
+caller of `abort()` sees success.
+
+### What it actually cost
+
+Census, manifest and status together took **0.43 seconds**. That is the
+"whole codebase, in seconds" part, and it holds.
+
+The judging did not take seconds. It took eighteen judgements and two file reads.
+What that buys is a number you can check: every catch clause in `lib/` was
+examined, none was skipped, and the two that matter are named with reasons.
+
+An ordinary agent pass reads four or five files, finds the conspicuous empty
+catch in `adapters.js`, and stops. That one is a false positive: it wraps setting
+a function's `name` property, it carries an eslint exemption, and it has no
+caller-visible consequence. Both real violations are in files that pass would
+never have opened.
+
+Sixteen passes is also a result. The tool did not manufacture findings.
 
 ## Driving the CLI directly
 
@@ -261,23 +293,23 @@ report. Guard it:
 - Prefer a broad rule plus more judgements over a clever narrow rule. Breadth
   costs tokens. Narrowness costs correctness, silently.
 
-## Worked example
+## The guard, working against its own author
 
-`examples/20260912-0826-css-literal-colour-audit.md` is a real sweep of the
-Ceetrix web app for hardcoded colours. One rule, 37 enumerated sites, 37 judged,
-29 violations and 8 compliant uses of `rgba(var(--token-rgb), alpha)` that the
-broad rule correctly surfaced and per-site judgement correctly cleared.
+`examples/20260912-0826-css-literal-colour-audit.md` is a sweep of a real web app
+for hardcoded colours. 37 sites enumerated, 37 judged, 29 violations, and 8
+compliant uses of `rgba(var(--token-rgb), alpha)` that the broad rule surfaced
+and per-site judgement cleared.
 
-Two findings came out of it that a file-by-file read would plausibly have missed:
-`--accent-primary` is referenced in two component files but defined nowhere in
-the palette, and the QA status badge is the one badge whose colours are bare hex
-with no dark mode override.
+Two findings a file-by-file read would plausibly have missed: `--accent-primary`
+is referenced in two component files and defined nowhere in the palette, so those
+declarations resolve to nothing; and one status badge is the only one whose
+colours are bare hex with no dark mode override.
 
-That example also demonstrates the guard working against its own author. The
-sweep used a CSS rule only, so it never looked at the 118 `.tsx` and 59 `.ts`
-files in the same directory, which hold a further 148 lines carrying literal
-colours. The report says so at the top and `status` reports `complete: false`.
-The first version of this tool would have called that audit complete.
+The part worth reading it for is the header. That sweep used a CSS rule only, so
+it never opened the 118 `.tsx` and 59 `.ts` files in the same directory, which
+hold a further 148 lines carrying literal colours. The report says so at the top
+and `status` reports `complete: false`. An earlier version of this tool called
+that audit complete.
 
 ## Tests
 
