@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+import random
 import shutil
 import sqlite3
 import subprocess
@@ -33,7 +34,7 @@ import textwrap
 import time
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # The index lives in a per-session temporary directory, never in the repository
 # being swept. A census rebuilds it in a fraction of a second, so there is
@@ -263,6 +264,15 @@ def connect(root: str, create: bool = False) -> sqlite3.Connection:
             judged_at TEXT NOT NULL,
             PRIMARY KEY (sweep, site_id)
         );
+        CREATE TABLE IF NOT EXISTS second_opinion (
+            sweep     TEXT NOT NULL,
+            site_id   TEXT NOT NULL,
+            verdict   TEXT NOT NULL,
+            note      TEXT NOT NULL,
+            method    TEXT NOT NULL DEFAULT '',
+            judged_at TEXT NOT NULL,
+            PRIMARY KEY (sweep, site_id)
+        );
         CREATE TABLE IF NOT EXISTS surface (
             sweep                 TEXT NOT NULL,
             name                  TEXT NOT NULL,
@@ -277,7 +287,10 @@ def connect(root: str, create: bool = False) -> sqlite3.Connection:
     # CREATE TABLE IF NOT EXISTS leaves an older ledger without newer columns,
     # so add them explicitly. A duplicate-column error means the column is
     # already present, which is the only acceptable reason for this to fail.
-    for table, column, decl in (("census_run", "uncovered", "TEXT NOT NULL DEFAULT '{}'"),):
+    for table, column, decl in (
+        ("census_run", "uncovered", "TEXT NOT NULL DEFAULT '{}'"),
+        ("verdict", "method", "TEXT NOT NULL DEFAULT ''"),
+    ):
         have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
         if column not in have:
             conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
@@ -641,6 +654,7 @@ def coverage(conn, name: str) -> dict:
         "by_verdict": by_verdict,
     }
     out.update(surface_counts(conn, name))
+    out.update(recheck_counts(conn, name))
     return out
 
 
@@ -943,6 +957,19 @@ def cmd_status(args):
         "complete": verdict["complete"],
         "incomplete_because": verdict["incomplete_because"],
     }
+    if counts["rechecked"] == 0:
+        payload["recheck_note"] = (
+            "No judgement has been looked at a second time, so nothing here says "
+            "whether the judging was any good. Coverage proves every site was "
+            "looked at once. Run `recheck <sweep>` for an independent second look."
+        )
+    if counts["single_method"]:
+        payload["method_note"] = (
+            "Every judgement in this sweep was reached the same way, or with no "
+            "method recorded. Repeating a method reproduces its blind spots "
+            "exactly, so a second look by a different method is stronger evidence "
+            "than the same one applied again."
+        )
     if not counts["declared_list"]:
         payload["surfaces_note"] = (
             "No parts of the system were declared for this audit, so this claim "
@@ -1003,7 +1030,7 @@ def cmd_next(args):
     print(json.dumps(payload, indent=2))
 
 
-def apply_verdict(conn, name: str, site_id: str, verdict: str, note: str):
+def apply_verdict(conn, name: str, site_id: str, verdict: str, note: str, method: str = ""):
     if verdict not in VERDICTS:
         die(f"verdict must be one of {', '.join(VERDICTS)}, got {verdict!r}")
     if not note.strip():
@@ -1014,11 +1041,17 @@ def apply_verdict(conn, name: str, site_id: str, verdict: str, note: str):
     if row is None:
         die(f"site {site_id} is not in sweep {name!r}. Site ids come from `next`.")
     conn.execute(
-        "INSERT INTO verdict (sweep, site_id, verdict, note, judged_at)"
-        " VALUES (?,?,?,?,?)"
+        "INSERT INTO verdict (sweep, site_id, verdict, note, method, judged_at)"
+        " VALUES (?,?,?,?,?,?)"
         " ON CONFLICT(sweep, site_id) DO UPDATE SET"
-        " verdict = excluded.verdict, note = excluded.note, judged_at = excluded.judged_at",
-        (name, site_id, verdict, note.strip(), now()),
+        " verdict = excluded.verdict, note = excluded.note,"
+        " method = excluded.method, judged_at = excluded.judged_at",
+        (name, site_id, verdict, note.strip(), (method or "").strip(), now()),
+    )
+    # Re-judging settles a dispute: the operator has now decided, so the second
+    # opinion it conflicted with is no longer an open question.
+    conn.execute(
+        "DELETE FROM second_opinion WHERE sweep = ? AND site_id = ?", (name, site_id)
     )
 
 
@@ -1036,13 +1069,27 @@ def cmd_verdict(args):
             die("verdict batch must be a JSON array of {site_id, verdict, note}")
         for item in batch:
             apply_verdict(
-                conn, args.name, item["site_id"], item["verdict"], item.get("note", "")
+                conn,
+                args.name,
+                item["site_id"],
+                item["verdict"],
+                item.get("note", ""),
+                item.get("method", ""),
             )
         applied = len(batch)
     else:
         if not args.site or not args.verdict:
             die("give --site and --verdict, or --from-json for a batch")
-        apply_verdict(conn, args.name, args.site, args.verdict, args.note or "")
+        if args.second_opinion:
+            apply_second_opinion(
+                conn, args.name, args.site, args.verdict, args.note or "",
+                args.method or "",
+            )
+        else:
+            apply_verdict(
+                conn, args.name, args.site, args.verdict, args.note or "",
+                args.method or "",
+            )
         applied = 1
     conn.commit()
     counts = coverage(conn, args.name)
@@ -1050,6 +1097,136 @@ def cmd_verdict(args):
 
 
 # ---------------------------------------------------------------- report
+
+
+def apply_second_opinion(conn, name: str, site_id: str, verdict: str, note: str, method: str):
+    """Record an independent second judgement. The first is never touched."""
+    if verdict not in VERDICTS:
+        die(f"verdict must be one of {', '.join(VERDICTS)}, got {verdict!r}")
+    if not note.strip():
+        die(f"site {site_id}: a verdict without a note is not a judgement")
+    first = conn.execute(
+        "SELECT verdict FROM verdict WHERE sweep = ? AND site_id = ?", (name, site_id)
+    ).fetchone()
+    if first is None:
+        die(
+            f"site {site_id} has no first judgement, so there is nothing to compare "
+            "against. Judge it with `verdict` before rechecking it."
+        )
+    already = conn.execute(
+        "SELECT 1 FROM second_opinion WHERE sweep = ? AND site_id = ?", (name, site_id)
+    ).fetchone()
+    if already is not None:
+        # A third opinion is a different feature. Overwriting the second would
+        # quietly destroy the comparison this whole command exists to produce.
+        die(f"site {site_id} already has a second opinion")
+    conn.execute(
+        "INSERT INTO second_opinion (sweep, site_id, verdict, note, method, judged_at)"
+        " VALUES (?,?,?,?,?,?)",
+        (name, site_id, verdict, note.strip(), (method or "").strip(), now()),
+    )
+    return first["verdict"] != verdict
+
+
+def recheck_counts(conn, name: str) -> dict:
+    """How many judgements were looked at twice, and how often the two differed.
+
+    A disagreement is a differing verdict, not a differing note. Two people can
+    describe the same conclusion differently, and counting that would make the
+    figure a measure of prose.
+    """
+    rows = list(conn.execute(
+        "SELECT v.site_id, v.verdict v1, s.verdict v2 FROM verdict v"
+        " JOIN second_opinion s ON s.sweep = v.sweep AND s.site_id = v.site_id"
+        " JOIN site t ON t.sweep = v.sweep AND t.site_id = v.site_id"
+        " WHERE v.sweep = ? AND t.state = ?",
+        (name, STATE_LIVE),
+    ))
+    disagreed = [r["site_id"] for r in rows if r["v1"] != r["v2"]]
+    methods = sorted({
+        r["method"].strip().lower()
+        for r in conn.execute(
+            "SELECT method FROM verdict WHERE sweep = ?"
+            " UNION SELECT method FROM second_opinion WHERE sweep = ?",
+            (name, name),
+        )
+        if r["method"].strip()
+    })
+    return {
+        "rechecked": len(rows),
+        "disagreed": len(disagreed),
+        "disagreeing_sites": disagreed,
+        "methods_used": methods,
+        # One method applied twice reproduces its blind spots exactly, so a
+        # sweep built entirely one way is a weaker claim than one reproduced
+        # differently. No method recorded at all is weaker still, not stronger.
+        "single_method": len(methods) <= 1,
+    }
+
+
+def cmd_recheck(args):
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    require_sweep(conn, args.name)
+
+    candidates = list(conn.execute(
+        "SELECT s.site_id, s.rule_id, s.file, s.start_line, s.end_line FROM site s"
+        " JOIN verdict v ON v.sweep = s.sweep AND v.site_id = s.site_id"
+        " LEFT JOIN second_opinion o ON o.sweep = s.sweep AND o.site_id = s.site_id"
+        " WHERE s.sweep = ? AND s.state = ? AND o.site_id IS NULL"
+        " ORDER BY s.site_id",
+        (args.name, STATE_LIVE),
+    ))
+
+    if args.site:
+        candidates = [r for r in candidates if r["site_id"] == args.site]
+        if not candidates:
+            die(
+                f"site {args.site} is not available to recheck: it must be a live "
+                "site with a first judgement and no second opinion yet"
+            )
+    elif not candidates:
+        print(json.dumps({
+            "sweep": args.name,
+            "sites": [],
+            "note": (
+                "Nothing to recheck. A second look needs a site that has already "
+                "been judged and not yet rechecked."
+            ),
+        }, indent=2))
+        return
+    else:
+        # Seeded on the sweep name so the same sample comes back across
+        # sessions, and drawn without regard to verdict. Sampling the passes is
+        # the tempting choice and would make the rate a statement about passes
+        # rather than about judgements.
+        rng = random.Random(args.name)
+        rng.shuffle(candidates)
+        candidates = candidates[: args.limit]
+
+    # Nothing of the first judgement appears here. Not a field, not the note,
+    # not the method. A reviewer who can see the first verdict is measuring
+    # their own deference rather than judging.
+    print(json.dumps({
+        "sweep": args.name,
+        "instruction": (
+            "Judge each site as though for the first time. The earlier verdict is "
+            "deliberately not shown. Record with "
+            "`verdict <sweep> --second-opinion --site <id> --verdict <v> --note <why>`."
+        ),
+        "sites": [
+            {
+                "site_id": r["site_id"],
+                "rule_id": r["rule_id"],
+                "file": r["file"],
+                "lines": f"{r['start_line']}-{r['end_line']}",
+                "context": read_context(
+                    root, r["file"], r["start_line"], r["end_line"], args.context
+                ),
+            }
+            for r in candidates
+        ],
+    }, indent=2))
 
 
 def cmd_report(args):
@@ -1373,7 +1550,19 @@ def main():
     p.add_argument("--site")
     p.add_argument("--verdict", choices=VERDICTS)
     p.add_argument("--note", default="")
-    p.add_argument("--from-json", help="file of [{site_id,verdict,note}], or - for stdin")
+    p.add_argument(
+        "--method",
+        default="",
+        help="how this judgement was reached, e.g. 'read the source', 'ran the tests'",
+    )
+    p.add_argument(
+        "--from-json", help="file of [{site_id,verdict,note,method}], or - for stdin"
+    )
+    p.add_argument(
+        "--second-opinion",
+        action="store_true",
+        help="record an independent second judgement, leaving the first untouched",
+    )
     p.set_defaults(func=cmd_verdict)
 
     p = sub.add_parser(
@@ -1389,6 +1578,17 @@ def main():
     p.add_argument("--examined", help="mark a surface as examined")
     p.add_argument("--unexamined", help="mark a surface as not examined after all")
     p.set_defaults(func=cmd_surfaces)
+
+    p = sub.add_parser(
+        "recheck",
+        parents=[root_opt],
+        help="offer judged sites for an independent second look, first verdict hidden",
+    )
+    p.add_argument("name")
+    p.add_argument("--limit", type=int, default=5)
+    p.add_argument("--site", help="recheck one specific site")
+    p.add_argument("--context", type=int, default=DEFAULT_CONTEXT_LINES)
+    p.set_defaults(func=cmd_recheck)
 
     p = sub.add_parser("status", parents=[root_opt], help="coverage arithmetic for one sweep")
     p.add_argument("name")
