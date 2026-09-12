@@ -43,6 +43,7 @@ scrub() {
     -e 's/[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:+-]+/TIMESTAMP/g' \
     -e "s#$WORK#WORK#g" -e "s#$RULES#RULES#g" -e "s#$SESSION_DIR#SESSION#g" \
     -e 's#/var/folders/[^ "]*#TMP#g' -e 's#/private/tmp/[^ "]*#TMP#g' \
+    -e 's#\.\./tmp\.[A-Za-z0-9]+#TMPREL#g' \
     -e 's/\b(codesweep|resweep)\b/TOOLNAME/g'
 }
 

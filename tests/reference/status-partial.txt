@@ -6,7 +6,7 @@
     {
       "rule_id": "ts-catch",
       "language": "typescript",
-      "path": "../tmp.zpmSz9a2zR/catch.yml",
+      "path": "TMPREL/catch.yml",
       "source_hash": "3ad77f69276cef1c"
     }
   ],
