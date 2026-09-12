@@ -1,4 +1,7 @@
-<img src="assets/icon.png" alt="codesweep" width="120" align="right">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.svg">
+  <img src="assets/icon.svg" alt="codesweep" width="120" align="right">
+</picture>
 
 # codesweep
 
@@ -35,6 +38,7 @@ this directory as a plugin with `claude --plugin-dir .`.
 ```sh
 codesweep census my-audit --rule rules/css-literal-colour.yml --scope src \
   --question "Is this literal colour a design-system violation?"
+codesweep manifest my-audit               # every site, one line, the citable record
 codesweep next my-audit --limit 15        # unjudged sites with source context
 codesweep verdict my-audit --from-json -  # [{site_id, verdict, note}]
 codesweep show my-audit --site <id>       # re-read one site after judging
