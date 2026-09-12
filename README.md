@@ -5,13 +5,16 @@
 
 # codesweep
 
-A coding agent asked to audit a codebase picks which files to read. So the
-candidate set is unknown, and so is what it missed. Running the audit again until
-nothing new turns up is a stopping heuristic, not coverage: it stops when the
-model runs out of ideas, which has nothing to do with whether the codebase ran
-out of violations.
+**Auditing and refactoring safely means knowing every place a change has to
+land. Coding agents don't know.** They read some files and tell you what they
+found. They can't tell you what they missed, and neither can you.
 
-codesweep takes the choice away.
+codesweep makes the candidate set countable. `ast-grep` enumerates every site
+matching a rule, the agent judges them one at a time, and coverage becomes
+arithmetic instead of a claim you have to take on trust.
+
+That is not complete knowledge of your codebase. It is complete enumeration of
+one shape at a time, which is the part agents were getting wrong.
 
 | | |
 |---|---|
