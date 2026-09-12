@@ -15,6 +15,11 @@ path = "src/main.rs"
 ast-grep-core = "0.45.3"
 ast-grep-config = "0.45.3"
 
+# Bundled on purpose. The storage engine compiles in, so there is no system
+# library for anyone to install, which is the whole point of the port.
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2 = "0.10"
+
 # The language set is chosen here rather than at runtime, so an unsupported
 # language is a fact the compiler knows. It is every language the Python tool
 # claims, minus scss: the crate has no scss grammar, and the CSS grammar parses

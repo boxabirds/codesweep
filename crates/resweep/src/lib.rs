@@ -5,4 +5,5 @@
 //! the one it replaces without going through a command line that does not
 //! exist yet.
 
+pub mod ledger;
 pub mod rules;
