@@ -157,3 +157,192 @@ fn test_other_language_unaffected() {
     assert_eq!(stats.symbols_found, 1);
     assert!(callees(&index).iter().any(|c| c == "g()" || c == "g"));
 }
+// ---------------------------------------------------------------- parse health
+
+/// TC-14 and TC-01. Valid source of either flavour reports a clean read.
+///
+/// The markup file is the case that matters: before the grammar was routed it
+/// reported error nodes while returning most of its content, which is the
+/// shape of the original defect.
+#[test]
+fn test_valid_source_reports_no_error_nodes() {
+    let (_index, tsx) = parse_by_extension(TSX_COMPONENT, "tsx");
+    assert_eq!(
+        tsx.error_nodes, 0,
+        "a markup file parsed by the markup grammar should read cleanly"
+    );
+
+    let (_index, ts) = parse_by_extension(TS_CONTROL_WITHOUT_JSX, "ts");
+    assert_eq!(ts.error_nodes, 0);
+}
+
+/// TC-05 and TC-15. Markup handed to the plain grammar is the case the count
+/// exists for: most of the file survives, and only this number says so.
+#[test]
+fn test_markup_under_the_plain_grammar_is_reported_as_damaged() {
+    let (index, stats) = parse_code(TSX_COMPONENT, Language::TypeScript);
+
+    assert!(
+        stats.error_nodes > 0,
+        "the plain grammar cannot accept markup, so the tree must carry error nodes"
+    );
+    assert!(
+        stats.symbols_found > 0,
+        "the point of the count is that the file still looks productive: {} symbols",
+        stats.symbols_found
+    );
+    assert!(
+        !callees(&index).iter().any(|c| c == "formatLabel"),
+        "this case is only meaningful while the plain grammar is still losing the markup calls"
+    );
+}
+
+/// TC-08. An empty file is read cleanly and yields nothing. Emptiness must not
+/// be reported as damage, or every empty file in a repository becomes a
+/// warning nobody reads.
+#[test]
+fn test_empty_file_is_clean_and_empty() {
+    let (index, stats) = parse_by_extension("", "tsx");
+
+    assert_eq!(stats.error_nodes, 0);
+    assert_eq!(stats.symbols_found, 0);
+    assert!(index.symbols().is_empty());
+}
+
+/// TC-09. Text that is not source at all reports damage.
+#[test]
+fn test_non_source_text_reports_error_nodes() {
+    let (_index, stats) = parse_by_extension("<<<< not source at all ][ }{", "tsx");
+
+    assert!(stats.error_nodes > 0);
+}
+
+/// TC-29. A damaged read is still a success. Callers get their partial results
+/// and the count beside them; the alternative, an Err, would throw away
+/// everything the reader did manage on a half-refactored tree, which is the
+/// tree this layer exists to work on.
+#[test]
+fn test_damaged_read_returns_ok() {
+    let (index, stats) = parse_code(TSX_COMPONENT, Language::TypeScript);
+
+    assert!(stats.error_nodes > 0);
+    assert!(!index.symbols().is_empty(), "partial results are still returned");
+}
+
+/// TC-18. A path that does not exist is an error, and no count is invented.
+#[test]
+fn test_missing_file_is_an_io_error() {
+    let mut index = SymbolIndex::new();
+    let missing = std::path::Path::new("/nonexistent/definitely/not/here.tsx");
+    let result = parse_file(missing, missing, Language::Tsx, &mut index);
+
+    assert!(matches!(result, Err(scanner_core::ParseError::IoError(_))));
+    assert!(index.symbols().is_empty());
+}
+
+// ------------------------------------------------- clean and degraded files
+
+fn rel(index: &SymbolIndex) -> (Vec<String>, Vec<String>) {
+    let mut clean: Vec<String> = index.files_parsed().iter().cloned().collect();
+    let mut degraded: Vec<String> = index.files_degraded().iter().cloned().collect();
+    clean.sort();
+    degraded.sort();
+    (clean, degraded)
+}
+
+fn parse_named(index: &mut SymbolIndex, name: &str, code: &str, language: Language) {
+    let dir = std::env::temp_dir().join(format!("sc-{}-{}", std::process::id(), name));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join(name);
+    std::fs::write(&path, code).unwrap();
+    let _ = parse_file(&path, std::path::Path::new(name), language, index);
+}
+
+/// TC-21 and TC-22. State before and after, not only the returned value.
+#[test]
+fn test_a_file_lands_in_exactly_one_set() {
+    let mut index = SymbolIndex::new();
+    let (clean, degraded) = rel(&index);
+    assert!(clean.is_empty() && degraded.is_empty(), "before: in neither");
+
+    parse_named(&mut index, "clean.tsx", TSX_COMPONENT, Language::Tsx);
+    let (clean, degraded) = rel(&index);
+    assert_eq!(clean, vec!["clean.tsx"]);
+    assert!(degraded.is_empty());
+
+    parse_named(&mut index, "broken.tsx", "<<<< ][ }{", Language::Tsx);
+    let (clean, degraded) = rel(&index);
+    assert_eq!(clean, vec!["clean.tsx"]);
+    assert_eq!(degraded, vec!["broken.tsx"]);
+}
+
+/// TC-24 and TC-28. The disjointness invariant, and the case an implementation
+/// that adds to one set without removing from the other will fail: re-reading
+/// a file whose condition has changed.
+#[test]
+fn test_reindexing_moves_a_file_rather_than_listing_it_twice() {
+    let mut index = SymbolIndex::new();
+
+    parse_named(&mut index, "moves.tsx", "<<<< ][ }{", Language::Tsx);
+    assert!(index.is_file_degraded("moves.tsx"));
+    assert!(!index.is_file_parsed("moves.tsx"));
+
+    parse_named(&mut index, "moves.tsx", TSX_COMPONENT, Language::Tsx);
+    assert!(index.is_file_parsed("moves.tsx"));
+    assert!(
+        !index.is_file_degraded("moves.tsx"),
+        "the file is in both sets, so every count derived from them is wrong"
+    );
+
+    let (clean, degraded) = rel(&index);
+    assert_eq!(clean, vec!["moves.tsx"]);
+    assert!(degraded.is_empty());
+}
+
+/// TC-23 and TC-25. A file that could not be read at all joins neither set,
+/// and a rejected file never inflates the clean count.
+#[test]
+fn test_unreadable_file_joins_neither_set() {
+    let mut index = SymbolIndex::new();
+    let missing = std::path::Path::new("/nonexistent/definitely/not/here.tsx");
+    let _ = parse_file(missing, std::path::Path::new("here.tsx"), Language::Tsx, &mut index);
+
+    let (clean, degraded) = rel(&index);
+    assert!(clean.is_empty(), "a file that was never read is not a clean read");
+    assert!(degraded.is_empty());
+    assert_eq!(index.stats().files_parsed, 0);
+}
+
+/// Workflow W-01, TC-13 and TC-26. A mixed tree: markup files with calls both
+/// inside and outside their markup, a plain file, and one file that is not
+/// source at all.
+///
+/// Counts are derived by reading the fixture, not copied from a run.
+#[test]
+fn test_mixed_tree_reports_every_call_and_does_not_abandon() {
+    let mut index = SymbolIndex::new();
+
+    parse_named(&mut index, "a.tsx", TSX_COMPONENT, Language::Tsx);
+    parse_named(&mut index, "b.tsx", TSX_COMPONENT, Language::Tsx);
+    parse_named(&mut index, "c.ts", TS_CONTROL_WITHOUT_JSX, Language::TypeScript);
+    parse_named(&mut index, "d.tsx", "<<<< not source ][ }{", Language::Tsx);
+
+    let (clean, degraded) = rel(&index);
+    assert_eq!(clean, vec!["a.tsx", "b.tsx", "c.ts"], "three valid files");
+    assert_eq!(degraded, vec!["d.tsx"], "exactly one unreadable as source");
+
+    // The run did not abandon: statistics exist for all four.
+    let stats = index.stats();
+    assert_eq!(stats.files_parsed, 3);
+    assert_eq!(stats.files_degraded, 1);
+
+    // Each markup file holds two calls inside its markup, so both files
+    // together contribute four of them.
+    let found = callees(&index);
+    assert_eq!(
+        found.iter().filter(|c| *c == "formatLabel").count(),
+        3,
+        "two markup files plus the plain control: {found:?}"
+    );
+    assert_eq!(found.iter().filter(|c| *c == "computeSize").count(), 3);
+}

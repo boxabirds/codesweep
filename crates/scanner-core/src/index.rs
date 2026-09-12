@@ -243,7 +243,16 @@ pub struct SymbolIndex {
     superclasses: HashMap<String, Vec<usize>>,
 
     // State
+    /// Files read cleanly. Narrower than it looks: a file the reader could not
+    /// fully follow belongs in `files_degraded` instead, never here and never
+    /// in both.
     files_parsed: HashSet<String>,
+    /// Files read with parts the reader could not follow.
+    ///
+    /// These still contributed symbols and calls, which is exactly why they
+    /// need naming. A file that produced nothing stands out; one that produced
+    /// most of its content and silently dropped the rest does not.
+    files_degraded: HashSet<String>,
 }
 
 impl SymbolIndex {
@@ -310,14 +319,31 @@ impl SymbolIndex {
         self.strings.push(literal);
     }
 
-    /// Mark a file as having been parsed.
+    /// Mark a file as having been read cleanly.
+    ///
+    /// Removes it from the degraded set, so that re-reading a file whose
+    /// condition has changed moves it rather than listing it twice.
     pub fn mark_file_parsed(&mut self, file: &str) {
+        self.files_degraded.remove(file);
         self.files_parsed.insert(file.to_string());
     }
 
-    /// Check if a file has been parsed.
+    /// Mark a file as read with parts the reader could not follow.
+    ///
+    /// Removes it from the clean set, for the same reason.
+    pub fn mark_file_degraded(&mut self, file: &str) {
+        self.files_parsed.remove(file);
+        self.files_degraded.insert(file.to_string());
+    }
+
+    /// Check if a file has been read cleanly.
     pub fn is_file_parsed(&self, file: &str) -> bool {
         self.files_parsed.contains(file)
+    }
+
+    /// Check if a file was read with parts the reader could not follow.
+    pub fn is_file_degraded(&self, file: &str) -> bool {
+        self.files_degraded.contains(file)
     }
 
     // Accessors for query implementations (Task 11)
@@ -402,9 +428,22 @@ impl SymbolIndex {
         self.files_parsed.len()
     }
 
-    /// Get set of parsed files.
+    /// Get set of files read cleanly.
     pub fn files_parsed(&self) -> &HashSet<String> {
         &self.files_parsed
+    }
+
+    /// Get count of files read with parts the reader could not follow.
+    pub fn files_degraded_count(&self) -> usize {
+        self.files_degraded.len()
+    }
+
+    /// Get set of files read with parts the reader could not follow.
+    ///
+    /// Anything a caller reports from this index is incomplete by whatever
+    /// these files contained, so a summary that omits them overstates itself.
+    pub fn files_degraded(&self) -> &HashSet<String> {
+        &self.files_degraded
     }
 
     /// Get statistics about the index.
@@ -416,6 +455,7 @@ impl SymbolIndex {
             call_sites: self.call_sites.len(),
             strings: self.strings.len(),
             files_parsed: self.files_parsed.len(),
+            files_degraded: self.files_degraded.len(),
         }
     }
 }
@@ -428,7 +468,12 @@ pub struct IndexStats {
     pub imports: usize,
     pub call_sites: usize,
     pub strings: usize,
+    /// Files read cleanly.
     pub files_parsed: usize,
+    /// Files read with parts the reader could not follow. A run reporting a
+    /// non-zero value here is reporting an incomplete result, whatever the
+    /// other counts say.
+    pub files_degraded: usize,
 }
 
 /// Serializable representation of index data (primary storage only).
@@ -441,6 +486,8 @@ struct IndexData {
     call_sites: Vec<CallSite>,
     strings: Vec<StringLiteral>,
     files_parsed: HashSet<String>,
+    #[serde(default)]
+    files_degraded: HashSet<String>,
 }
 
 impl SymbolIndex {
@@ -453,6 +500,7 @@ impl SymbolIndex {
             call_sites: self.call_sites.clone(),
             strings: self.strings.clone(),
             files_parsed: self.files_parsed.clone(),
+            files_degraded: self.files_degraded.clone(),
         };
 
         let file = File::create(path)?;
@@ -480,6 +528,7 @@ impl SymbolIndex {
             subclasses: HashMap::new(),
             superclasses: HashMap::new(),
             files_parsed: data.files_parsed,
+            files_degraded: data.files_degraded,
         };
 
         // Rebuild symbol indices by re-adding each symbol

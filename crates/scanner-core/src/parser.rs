@@ -31,6 +31,19 @@ pub struct ParseStats {
     pub total_cc: usize,
     /// Maximum cyclomatic complexity of any single function.
     pub max_function_cc: usize,
+    /// Number of ERROR or MISSING nodes in the parsed tree.
+    ///
+    /// Zero means the reader made complete sense of the file. Anything above
+    /// zero means it did not, and whatever sat in those regions contributed
+    /// nothing. Tree-sitter recovers rather than failing, so without this a
+    /// file the reader could not follow is indistinguishable from one it read
+    /// perfectly.
+    ///
+    /// A count rather than a flag, deliberately. `has_error()` on the root is
+    /// constant time and yields a boolean, which cannot separate a file with
+    /// one stray token from a file the reader abandoned. That separation is
+    /// the point, so the cost of one predicate per node is accepted.
+    pub error_nodes: usize,
 }
 
 /// Error during parsing.
@@ -90,7 +103,14 @@ pub fn parse_file(
 
     visit_node(tree.root_node(), &mut context, index, &mut stats);
 
-    index.mark_file_parsed(&file_str);
+    // One or the other, never both and never neither. A file that produced
+    // results while the reader was lost is the case the split exists for: its
+    // counts look ordinary and its contribution is not.
+    if stats.error_nodes > 0 {
+        index.mark_file_degraded(&file_str);
+    } else {
+        index.mark_file_parsed(&file_str);
+    }
 
     stats.parse_time_ms = start.elapsed().as_millis() as u64;
     Ok(stats)
@@ -154,6 +174,13 @@ fn visit_node(
     stats: &mut ParseStats,
 ) {
     let kind = node.kind();
+
+    // Counted on the walk that is happening anyway, rather than in a second
+    // traversal. MISSING counts alongside ERROR: a node the parser inserted to
+    // repair the tree marks the same thing, a region it could not follow.
+    if node.is_error() || node.is_missing() {
+        stats.error_nodes += 1;
+    }
 
     // Check if this is a decorator
     if ctx.language.decorator_node_types().contains(&kind) {
