@@ -1,0 +1,22 @@
+{
+  "sweep": "s",
+  "question": "swallowed?",
+  "remaining_after_this_batch": 0,
+  "sites": [
+    {
+      "site_id": "0ec153b39fc82409",
+      "rule_id": "ts-catch",
+      "file": "src/a.ts",
+      "lines": "1-1",
+      "context": ">     1 | export function a() { try { x(); } catch (e) { return []; } }"
+    },
+    {
+      "site_id": "e464b2cd43708214",
+      "rule_id": "ts-catch",
+      "file": "src/b.ts",
+      "lines": "1-1",
+      "context": ">     1 | export function b() { try { x(); } catch (e) { throw e; } }"
+    }
+  ]
+}
+EXIT=0

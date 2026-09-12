@@ -1,0 +1,12 @@
+sweep: s
+question: swallowed?
+rules: ts-catch
+listed 2 of 2 live sites, 1 unjudged
+
+src/a.ts
+  0ec153b39fc82409  1-1  violation
+src/b.ts
+  e464b2cd43708214  1-1  -
+
+Every candidate is listed above. This set is complete with respect to the rules named, and to syntax: matching does no scope or type analysis, so a site of a different shape was never a candidate.
+EXIT=0

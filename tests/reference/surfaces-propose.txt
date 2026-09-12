@@ -1,0 +1,14 @@
+{
+  "sweep": "s",
+  "file_discovery": "git",
+  "proposed": [
+    {
+      "name": "source: src",
+      "scope": "src",
+      "evidence": "src/a.ts",
+      "already_declared": false
+    }
+  ],
+  "note": "A starting point, not a complete list. This is drawn only from what leaves a trace in the repository. Parts of a system that leave none, such as the secrets actually set in a deployed environment or the contents of production data, will never be proposed here and have to be named by hand. Add what is missing and remove what does not apply."
+}
+EXIT=0

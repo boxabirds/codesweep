@@ -1,0 +1,14 @@
+{
+  "sweep": "s",
+  "instruction": "Judge each site as though for the first time. The earlier verdict is deliberately not shown. Record with `verdict <sweep> --second-opinion --site <id> --verdict <v> --note <why>`.",
+  "sites": [
+    {
+      "site_id": "0ec153b39fc82409",
+      "rule_id": "ts-catch",
+      "file": "src/a.ts",
+      "lines": "1-1",
+      "context": ">     1 | export function a() { try { x(); } catch (e) { return []; } }"
+    }
+  ]
+}
+EXIT=0

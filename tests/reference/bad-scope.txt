@@ -1,0 +1,2 @@
+codesweep: scope WORK/nowhere does not exist (relative scopes resolve against --root, WORK)
+EXIT=1

@@ -1,0 +1,11 @@
+{
+  "sweep": "s",
+  "surfaces": [],
+  "declared_list": false,
+  "surfaces_declared": 0,
+  "surfaces_examined": 0,
+  "surfaces_unexamined": [],
+  "surfaces_added_late": [],
+  "note": "No surfaces are declared. Coverage will be reported against the scope given to the census, not against the system. Declare the parts of the system this audit intends to examine and the claim becomes relative to that list instead."
+}
+EXIT=0

@@ -1,0 +1,2 @@
+codesweep: no sweep named 'nosuchsweep'. Known sweeps: s
+EXIT=1

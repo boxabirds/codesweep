@@ -1,0 +1,49 @@
+{
+  "sweep": "s",
+  "question": "swallowed?",
+  "scope": "src",
+  "rules": [
+    {
+      "rule_id": "ts-catch",
+      "language": "typescript",
+      "path": "../tmp.zpmSz9a2zR/catch.yml",
+      "source_hash": "3ad77f69276cef1c"
+    }
+  ],
+  "last_census": {
+    "ran_at": "TIMESTAMP",
+    "found": 2,
+    "added": 2,
+    "departed": 0,
+    "uncovered": "{}"
+  },
+  "uncovered_extensions": {},
+  "coverage": {
+    "live_sites": 2,
+    "judged": 1,
+    "unjudged": 1,
+    "by_verdict": {
+      "violation": 1
+    },
+    "declared_list": false,
+    "surfaces_declared": 0,
+    "surfaces_examined": 0,
+    "surfaces_unexamined": [],
+    "surfaces_added_late": [],
+    "rechecked": 0,
+    "disagreed": 0,
+    "disagreeing_sites": [],
+    "methods_used": [
+      "read the source"
+    ],
+    "single_method": true
+  },
+  "complete": false,
+  "incomplete_because": [
+    "1 enumerated sites have no verdict"
+  ],
+  "recheck_note": "No judgement has been looked at a second time, so nothing here says whether the judging was any good. Coverage proves every site was looked at once. Run `recheck <sweep>` for an independent second look.",
+  "method_note": "Every judgement in this sweep was reached the same way, or with no method recorded. Repeating a method reproduces its blind spots exactly, so a second look by a different method is stronger evidence than the same one applied again.",
+  "surfaces_note": "No parts of the system were declared for this audit, so this claim covers the scope the census was given and not the system. Run `surfaces <sweep> --propose` to see what is here."
+}
+EXIT=0

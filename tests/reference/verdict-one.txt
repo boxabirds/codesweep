@@ -1,0 +1,24 @@
+{
+  "applied": 1,
+  "coverage": {
+    "live_sites": 2,
+    "judged": 1,
+    "unjudged": 1,
+    "by_verdict": {
+      "violation": 1
+    },
+    "declared_list": false,
+    "surfaces_declared": 0,
+    "surfaces_examined": 0,
+    "surfaces_unexamined": [],
+    "surfaces_added_late": [],
+    "rechecked": 0,
+    "disagreed": 0,
+    "disagreeing_sites": [],
+    "methods_used": [
+      "read the source"
+    ],
+    "single_method": true
+  }
+}
+EXIT=0

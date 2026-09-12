@@ -1,0 +1,17 @@
+{
+  "sweep": "s",
+  "scope": "src",
+  "rules": [
+    "ts-catch"
+  ],
+  "rule_languages": [
+    "typescript"
+  ],
+  "sites_found": 2,
+  "sites_new": 2,
+  "sites_departed": 0,
+  "unjudged": 2,
+  "file_discovery": "git",
+  "note": "The census is complete with respect to these rules only. A site whose code changed since it was judged returns as new and needs judging again."
+}
+EXIT=0
