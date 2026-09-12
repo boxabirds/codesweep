@@ -1121,6 +1121,33 @@ def cmd_report(args):
             "above covers the scope the census was given rather than the system."
         )
     out.append("")
+    surfaces = surfaces_of(conn, args.name)
+    if surfaces:
+        out.append("## Parts of the system this audit set out to examine")
+        out.append("")
+        out.append(
+            "Completeness above is relative to this list as well as to the rules. "
+            "Every part is shown, not only the outstanding ones, because the list "
+            "is the scope of the claim."
+        )
+        out.append("")
+        out.append("| Part | Scope | Examined | Added after the list was written |")
+        out.append("|---|---|---|---|")
+        baseline = min(s["declared_after_census"] for s in surfaces)
+        for s in surfaces:
+            late = "yes" if s["declared_after_census"] > baseline else "no"
+            out.append(
+                f"| {s['name']} | {s['scope'] or 'no path in the repository'} "
+                f"| {'yes' if s['examined_at'] else 'no'} | {late} |"
+            )
+        out.append("")
+        if any(s["declared_after_census"] > baseline for s in surfaces):
+            out.append(
+                "This list grew during the audit. A part nobody thought of at the "
+                "start is evidence the list may still be short, and a part added "
+                "late is not less likely to matter than one thought of first."
+            )
+            out.append("")
     out.append("## Census rules")
     out.append("")
     out.append(
