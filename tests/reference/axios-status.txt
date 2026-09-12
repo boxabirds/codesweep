@@ -1,31 +1,31 @@
 --- stdout
 {
-  "sweep": "s",
+  "sweep": "big",
   "question": "swallowed?",
-  "scope": "src",
+  "scope": "lib",
   "rules": [
     {
-      "rule_id": "ts-catch",
+      "rule_id": "ts-catch-clause",
       "language": "typescript",
-      "path": "../rules/catch.yml",
-      "source_hash": "3ad77f69276cef1c"
+      "path": "../../../../../../../Users/julian/expts/TOOLNAME/rules/ts-catch-clause.yml",
+      "source_hash": "92c168c97ecd96c5"
     }
   ],
   "last_census": {
     "ran_at": "TIMESTAMP",
-    "found": 2,
-    "added": 2,
+    "found": 0,
+    "added": 0,
     "departed": 0,
-    "uncovered": "{}"
+    "uncovered": "{\".js\": 62}"
   },
-  "uncovered_extensions": {},
+  "uncovered_extensions": {
+    ".js": 62
+  },
   "coverage": {
-    "live_sites": 2,
-    "judged": 1,
-    "unjudged": 1,
-    "by_verdict": {
-      "violation": 1
-    },
+    "live_sites": 0,
+    "judged": 0,
+    "unjudged": 0,
+    "by_verdict": {},
     "declared_list": false,
     "surfaces_declared": 0,
     "surfaces_examined": 0,
@@ -34,14 +34,13 @@
     "rechecked": 0,
     "disagreed": 0,
     "disagreeing_sites": [],
-    "methods_used": [
-      "read the source"
-    ],
+    "methods_used": [],
     "single_method": true
   },
   "complete": false,
   "incomplete_because": [
-    "1 enumerated sites have no verdict"
+    "no sites were enumerated, so there is nothing to be complete about",
+    "the scope holds source no rule can reach (.js), so those files were never examined"
   ],
   "recheck_note": "No judgement has been looked at a second time, so nothing here says whether the judging was any good. Coverage proves every site was looked at once. Run `recheck <sweep>` for an independent second look.",
   "method_note": "Every judgement in this sweep was reached the same way, or with no method recorded. Repeating a method reproduces its blind spots exactly, so a second look by a different method is stronger evidence than the same one applied again.",

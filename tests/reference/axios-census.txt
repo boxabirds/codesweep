@@ -1,0 +1,24 @@
+--- stdout
+{
+  "sweep": "big",
+  "scope": "lib",
+  "rules": [
+    "ts-catch-clause"
+  ],
+  "rule_languages": [
+    "typescript"
+  ],
+  "sites_found": 0,
+  "sites_new": 0,
+  "sites_departed": 0,
+  "unjudged": 0,
+  "file_discovery": "git",
+  "note": "The census is complete with respect to these rules only. A site whose code changed since it was judged returns as new and needs judging again.",
+  "WARNING_uncovered_extensions": {
+    ".js": 62
+  },
+  "WARNING": "The scope contains source files with extensions that NO census rule covers, so those files were never examined and cannot appear in the report. ast-grep treats tsx as a language separate from typescript, and jsx separately from javascript, so a .tsx file needs its own rule with `language: tsx`. Add a rule per language or narrow the scope. Coverage arithmetic below counts only the files the rules can reach."
+}
+--- stderr
+--- exit
+0

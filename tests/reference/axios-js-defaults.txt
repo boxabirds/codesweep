@@ -1,17 +1,17 @@
 --- stdout
 {
-  "sweep": "s",
-  "scope": "src",
+  "sweep": "jsdef",
+  "scope": "lib",
   "rules": [
-    "ts-catch"
+    "js-default"
   ],
   "rule_languages": [
-    "typescript"
+    "javascript"
   ],
-  "sites_found": 2,
-  "sites_new": 2,
+  "sites_found": 148,
+  "sites_new": 148,
   "sites_departed": 0,
-  "unjudged": 2,
+  "unjudged": 148,
   "file_discovery": "git",
   "note": "The census is complete with respect to these rules only. A site whose code changed since it was judged returns as new and needs judging again."
 }

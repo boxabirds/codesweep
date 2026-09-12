@@ -1,2 +1,5 @@
+--- stdout
+--- stderr
 TOOLNAME: site 0ec153b39fc82409: a verdict without a note is not a judgement
-EXIT=1
+--- exit
+1

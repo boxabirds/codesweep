@@ -1,2 +1,5 @@
+--- stdout
+--- stderr
 TOOLNAME: scope WORK/nowhere does not exist (relative scopes resolve against --root, WORK)
-EXIT=1
+--- exit
+1

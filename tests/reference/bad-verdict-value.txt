@@ -1,0 +1,10 @@
+--- stdout
+--- stderr
+usage: TOOLNAME verdict [-h] [--root ROOT] [--site SITE]
+  [--verdict {violation,pass,na}] [--note NOTE]
+  [--method METHOD] [--from-json FROM_JSON]
+  [--second-opinion]
+  name
+TOOLNAME verdict: error: argument --verdict: invalid choice: 'maybe' (choose from violation, pass, na)
+--- exit
+2

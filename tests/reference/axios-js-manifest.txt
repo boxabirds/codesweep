@@ -1,0 +1,38 @@
+--- stdout
+sweep: js
+question: swallowed?
+rules: js-catch
+listed 18 of 18 live sites, 18 unjudged
+
+lib/adapters/adapters.js
+  8ec94c1f2476b45b  29-31  -
+lib/adapters/fetch.js
+  2a201e4fc7bae453  27-29  -
+  05f0293946c09fe8  245-258  -
+lib/adapters/http.js
+  c3b6dcb8abdccb22  359-361  -
+  9f0e26a06add4d5f  446-448  -
+  55aaaf6342111ddb  509-510  -
+  11fb4acc92decb63  594-600  -
+  7cc6a4c028ae3ee5  794-796  -
+lib/core/Axios.js
+  1189f65c3948820a  41-62  -
+  ad67fd5aa0a0ece7  56-58  -
+  d18f63b37bd537ae  178-181  -
+  8eb526c816966815  186-188  -
+lib/defaults/index.js
+  8d62abc5c37d65c9  26-30  -
+  f754d9a65cace0f5  115-122  -
+lib/helpers/callbackify.js
+  6f16d0f27e9e90b0  9-11  -
+lib/helpers/deprecatedMethod.js
+  e364b46618afb4a2  25-25  -
+lib/helpers/trackStream.js
+  96b3ca6ec40e80df  75-78  -
+lib/utils.js
+  479bfe10acc7a14c  154-157  -
+
+Every candidate is listed above. This set is complete with respect to the rules named, and to syntax: matching does no scope or type analysis, so a site of a different shape was never a candidate.
+--- stderr
+--- exit
+0

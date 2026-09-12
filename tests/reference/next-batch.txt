@@ -1,3 +1,4 @@
+--- stdout
 {
   "sweep": "s",
   "question": "swallowed?",
@@ -19,4 +20,6 @@
     }
   ]
 }
-EXIT=0
+--- stderr
+--- exit
+0

@@ -1,0 +1,17 @@
+--- stdout
+{
+  "site_id": "0ec153b39fc82409",
+  "rule_id": "ts-catch",
+  "file": "src/a.ts",
+  "lines": "1-1",
+  "state": "live",
+  "verdict": {
+    "verdict": "violation",
+    "note": "returns an empty array",
+    "judged_at": "TIMESTAMP"
+  },
+  "context": ">     1 | export function a() { try { x(); } catch (e) { return []; } }"
+}
+--- stderr
+--- exit
+0

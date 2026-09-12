@@ -1,3 +1,4 @@
+--- stdout
 {
   "sweep": "s",
   "file_discovery": "git",
@@ -11,4 +12,6 @@
   ],
   "note": "A starting point, not a complete list. This is drawn only from what leaves a trace in the repository. Parts of a system that leave none, such as the secrets actually set in a deployed environment or the contents of production data, will never be proposed here and have to be named by hand. Add what is missing and remove what does not apply."
 }
-EXIT=0
+--- stderr
+--- exit
+0

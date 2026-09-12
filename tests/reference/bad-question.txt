@@ -1,0 +1,6 @@
+--- stdout
+--- stderr
+TOOLNAME: sweep 's' already asks: 'swallowed?'
+Changing the question changes what the verdicts mean. Start a new sweep.
+--- exit
+1

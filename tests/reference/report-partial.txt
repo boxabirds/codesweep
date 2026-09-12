@@ -1,0 +1,54 @@
+--- stdout
+# Sweep: s
+
+**Question.** swallowed?
+
+**Scope.** `src`
+
+## Coverage
+
+| | |
+|---|---|
+| Candidate sites enumerated | 2 |
+| Sites judged | 1 |
+| Sites unjudged | 1 |
+| Verdict `violation` | 1 |
+| Verdict `pass` | 0 |
+| Verdict `na` | 0 |
+
+> This sweep is INCOMPLETE, because:
+>
+> - 1 enumerated sites have no verdict
+>
+> Findings below are partial.
+>
+> No parts of the system were declared for this audit, so the claim above covers the scope the census was given rather than the system.
+
+## Census rules
+
+Completeness is relative to these rules. A violation shaped differently from every rule here was never a candidate and does not appear. The rule source is reproduced in full so this claim stays checkable after the rule files themselves have moved or gone.
+
+### `ts-catch` (typescript)
+
+From `../rules/catch.yml` at census time.
+
+```yaml
+id: ts-catch
+language: typescript
+rule:
+  kind: catch_clause
+```
+
+Matching is syntactic. ast-grep does no scope, type or dataflow analysis, so it cannot tell one `foo` from another `foo` in a different scope, and a call written in a different shape is a different pattern. A sweep is complete with respect to a syntactic shape, never with respect to a symbol.
+
+## Violations (1)
+
+### `src/a.ts:1`
+
+Rule `ts-catch`, site `0ec153b39fc82409`, lines 1-1.
+
+returns an empty array
+
+--- stderr
+--- exit
+0

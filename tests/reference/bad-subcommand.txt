@@ -1,0 +1,8 @@
+--- stdout
+--- stderr
+usage: TOOLNAME [-h] [--root ROOT_GLOBAL]
+  {census,next,verdict,surfaces,recheck,status,report,manifest,show,list}
+  ...
+TOOLNAME: error: argument command: invalid choice: 'nosuchcommand' (choose from census, next, verdict, surfaces, recheck, status, report, manifest, show, list)
+--- exit
+2

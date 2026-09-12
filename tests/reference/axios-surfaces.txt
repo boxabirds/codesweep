@@ -1,0 +1,83 @@
+--- stdout
+{
+  "sweep": "big",
+  "file_discovery": "git",
+  "proposed": [
+    {
+      "name": "automated checks",
+      "scope": null,
+      "evidence": ".github/workflows/ci.yml",
+      "already_declared": false
+    },
+    {
+      "name": "package: test/module/cjs",
+      "scope": "test/module/cjs",
+      "evidence": "test/module/cjs/package.json",
+      "already_declared": false
+    },
+    {
+      "name": "package: test/module/esm",
+      "scope": "test/module/esm",
+      "evidence": "test/module/esm/package.json",
+      "already_declared": false
+    },
+    {
+      "name": "package: test/module/ts",
+      "scope": "test/module/ts",
+      "evidence": "test/module/ts/package.json",
+      "already_declared": false
+    },
+    {
+      "name": "package: test/module/ts-require",
+      "scope": "test/module/ts-require",
+      "evidence": "test/module/ts-require/package.json",
+      "already_declared": false
+    },
+    {
+      "name": "package: test/module/ts-require-default",
+      "scope": "test/module/ts-require-default",
+      "evidence": "test/module/ts-require-default/package.json",
+      "already_declared": false
+    },
+    {
+      "name": "package: test/module/typings/cjs",
+      "scope": "test/module/typings/cjs",
+      "evidence": "test/module/typings/cjs/package.json",
+      "already_declared": false
+    },
+    {
+      "name": "package: test/module/typings/esm",
+      "scope": "test/module/typings/esm",
+      "evidence": "test/module/typings/esm/package.json",
+      "already_declared": false
+    },
+    {
+      "name": "source: bin",
+      "scope": "bin",
+      "evidence": "bin/GithubAPI.js",
+      "already_declared": false
+    },
+    {
+      "name": "source: examples",
+      "scope": "examples",
+      "evidence": "examples/all/index.html",
+      "already_declared": false
+    },
+    {
+      "name": "source: lib",
+      "scope": "lib",
+      "evidence": "lib/adapters/adapters.js",
+      "already_declared": false
+    },
+    {
+      "name": "source: sandbox",
+      "scope": "sandbox",
+      "evidence": "sandbox/client.html",
+      "already_declared": false
+    }
+  ],
+  "note": "A starting point, not a complete list. This is drawn only from what leaves a trace in the repository. Parts of a system that leave none, such as the secrets actually set in a deployed environment or the contents of production data, will never be proposed here and have to be named by hand. Add what is missing and remove what does not apply."
+}
+--- stderr
+--- exit
+0

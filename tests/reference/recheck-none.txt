@@ -1,3 +1,4 @@
+--- stdout
 {
   "sweep": "s",
   "instruction": "Judge each site as though for the first time. The earlier verdict is deliberately not shown. Record with `verdict <sweep> --second-opinion --site <id> --verdict <v> --note <why>`.",
@@ -11,4 +12,6 @@
     }
   ]
 }
-EXIT=0
+--- stderr
+--- exit
+0

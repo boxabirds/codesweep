@@ -1,3 +1,4 @@
+--- stdout
 {
   "applied": 1,
   "coverage": {
@@ -21,4 +22,6 @@
     "single_method": true
   }
 }
-EXIT=0
+--- stderr
+--- exit
+0

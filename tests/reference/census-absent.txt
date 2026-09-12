@@ -1,0 +1,5 @@
+--- stdout
+--- stderr
+TOOLNAME: no ledger at SESSION/fixture-PATHHASH.db. Run `TOOLNAME census` first.
+--- exit
+1

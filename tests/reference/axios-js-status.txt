@@ -1,31 +1,29 @@
 --- stdout
 {
-  "sweep": "s",
+  "sweep": "js",
   "question": "swallowed?",
-  "scope": "src",
+  "scope": "lib",
   "rules": [
     {
-      "rule_id": "ts-catch",
-      "language": "typescript",
-      "path": "../rules/catch.yml",
-      "source_hash": "3ad77f69276cef1c"
+      "rule_id": "js-catch",
+      "language": "javascript",
+      "path": "../rules/js-catch.yml",
+      "source_hash": "47561af65c897116"
     }
   ],
   "last_census": {
     "ran_at": "TIMESTAMP",
-    "found": 2,
-    "added": 2,
+    "found": 18,
+    "added": 18,
     "departed": 0,
     "uncovered": "{}"
   },
   "uncovered_extensions": {},
   "coverage": {
-    "live_sites": 2,
-    "judged": 1,
-    "unjudged": 1,
-    "by_verdict": {
-      "violation": 1
-    },
+    "live_sites": 18,
+    "judged": 0,
+    "unjudged": 18,
+    "by_verdict": {},
     "declared_list": false,
     "surfaces_declared": 0,
     "surfaces_examined": 0,
@@ -34,14 +32,12 @@
     "rechecked": 0,
     "disagreed": 0,
     "disagreeing_sites": [],
-    "methods_used": [
-      "read the source"
-    ],
+    "methods_used": [],
     "single_method": true
   },
   "complete": false,
   "incomplete_because": [
-    "1 enumerated sites have no verdict"
+    "18 enumerated sites have no verdict"
   ],
   "recheck_note": "No judgement has been looked at a second time, so nothing here says whether the judging was any good. Coverage proves every site was looked at once. Run `recheck <sweep>` for an independent second look.",
   "method_note": "Every judgement in this sweep was reached the same way, or with no method recorded. Repeating a method reproduces its blind spots exactly, so a second look by a different method is stronger evidence than the same one applied again.",

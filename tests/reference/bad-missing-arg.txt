@@ -1,0 +1,5 @@
+--- stdout
+--- stderr
+TOOLNAME: give --site and --verdict, or --from-json for a batch
+--- exit
+1

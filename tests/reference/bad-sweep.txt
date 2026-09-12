@@ -1,2 +1,5 @@
+--- stdout
+--- stderr
 TOOLNAME: no sweep named 'nosuchsweep'. Known sweeps: s
-EXIT=1
+--- exit
+1

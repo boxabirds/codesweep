@@ -1,0 +1,10 @@
+--- stdout
+{
+  "sweep": "big",
+  "question": "swallowed?",
+  "remaining_after_this_batch": 0,
+  "sites": []
+}
+--- stderr
+--- exit
+0

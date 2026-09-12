@@ -1,0 +1,46 @@
+--- stdout
+{
+  "sweep": "js",
+  "question": "swallowed?",
+  "remaining_after_this_batch": 13,
+  "sites": [
+    {
+      "site_id": "8ec94c1f2476b45b",
+      "rule_id": "js-catch",
+      "file": "lib/adapters/adapters.js",
+      "lines": "29-31",
+      "context": "     21 |   }\n     22 | };\n     23 | \n     24 | // Assign adapter names for easier debugging and identification\n     25 | utils.forEach(knownAdapters, (fn, value) => {\n     26 |   if (fn) {\n     27 |     try {\n     28 |       Object.defineProperty(fn, 'name', { value });\n>    29 |     } catch (e) {\n>    30 |       // eslint-disable-next-line no-empty\n>    31 |     }\n     32 |     Object.defineProperty(fn, 'adapterName', { value });\n     33 |   }\n     34 | });\n     35 | \n     36 | /**\n     37 |  * Render a rejection reason string for unknown or unsupported adapters\n     38 |  *\n     39 |  * @param {string} reason"
+    },
+    {
+      "site_id": "2a201e4fc7bae453",
+      "rule_id": "js-catch",
+      "file": "lib/adapters/fetch.js",
+      "lines": "27-29",
+      "context": "     19 | const {\n     20 |   ReadableStream, TextEncoder\n     21 | } = utils.global;\n     22 | \n     23 | \n     24 | const test = (fn, ...args) => {\n     25 |   try {\n     26 |     return !!fn(...args);\n>    27 |   } catch (e) {\n>    28 |     return false\n>    29 |   }\n     30 | }\n     31 | \n     32 | const factory = (env) => {\n     33 |   env = utils.merge.call({\n     34 |     skipUndefined: true\n     35 |   }, globalFetchAPI, env);\n     36 | \n     37 |   const {fetch: envFetch, Request, Response} = env;"
+    },
+    {
+      "site_id": "05f0293946c09fe8",
+      "rule_id": "js-catch",
+      "file": "lib/adapters/fetch.js",
+      "lines": "245-258",
+      "context": "    237 |           data: responseData,\n    238 |           headers: AxiosHeaders.from(response.headers),\n    239 |           status: response.status,\n    240 |           statusText: response.statusText,\n    241 |           config,\n    242 |           request\n    243 |         })\n    244 |       })\n>   245 |     } catch (err) {\n>   246 |       unsubscribe && unsubscribe();\n>   247 | \n>   248 |       if (err && err.name === 'TypeError' && /Load failed|fetch/i.test(err.message)) {\n>   249 |         throw Object.assign(\n>   250 |           new AxiosError('Network Error', AxiosError.ERR_NETWORK, config, request),\n>   251 |           {\n>   252 |             cause: err.cause || err\n>   253 |           }\n>   254 |         )\n>   255 |       }\n>   256 | \n>   257 |       throw AxiosError.from(err, err && err.code, config, request);\n>   258 |     }\n    259 |   }\n    260 | }\n    261 | \n    262 | const seedCache = new Map();\n    263 | \n    264 | export const getFetch = (config) => {\n    265 |   let env = (config && config.env) || {};\n    266 |   const {fetch, Request, Response} = env;"
+    },
+    {
+      "site_id": "c3b6dcb8abdccb22",
+      "rule_id": "js-catch",
+      "file": "lib/adapters/http.js",
+      "lines": "359-361",
+      "context": "    351 |       }\n    352 |     }\n    353 | \n    354 |     const abortEmitter = new EventEmitter();\n    355 | \n    356 |     function abort(reason) {\n    357 |       try {\n    358 |         abortEmitter.emit('abort', !reason || reason.type ? new CanceledError(null, config, req) : reason);\n>   359 |       } catch(err) {\n>   360 |         console.warn('emit error', err);\n>   361 |       }\n    362 |     }\n    363 | \n    364 |     abortEmitter.once('abort', reject);\n    365 | \n    366 |     const onFinished = () => {\n    367 |       if (config.cancelToken) {\n    368 |         config.cancelToken.unsubscribe(abort);\n    369 |       }"
+    },
+    {
+      "site_id": "9f0e26a06add4d5f",
+      "rule_id": "js-catch",
+      "file": "lib/adapters/http.js",
+      "lines": "446-448",
+      "context": "    438 |           config\n    439 |         });\n    440 |       }\n    441 | \n    442 |       try {\n    443 |         convertedData = fromDataURI(config.url, responseType === 'blob', {\n    444 |           Blob: config.env && config.env.Blob\n    445 |         });\n>   446 |       } catch (err) {\n>   447 |         throw AxiosError.from(err, AxiosError.ERR_BAD_REQUEST, config);\n>   448 |       }\n    449 | \n    450 |       if (responseType === 'text') {\n    451 |         convertedData = convertedData.toString(responseEncoding);\n    452 | \n    453 |         if (!responseEncoding || responseEncoding === 'utf8') {\n    454 |           convertedData = utils.stripBOM(convertedData);\n    455 |         }\n    456 |       } else if (responseType === 'stream') {"
+    }
+  ]
+}
+--- stderr
+--- exit
+0

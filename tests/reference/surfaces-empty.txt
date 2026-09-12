@@ -1,3 +1,4 @@
+--- stdout
 {
   "sweep": "s",
   "surfaces": [],
@@ -8,4 +9,6 @@
   "surfaces_added_late": [],
   "note": "No surfaces are declared. Coverage will be reported against the scope given to the census, not against the system. Declare the parts of the system this audit intends to examine and the claim becomes relative to that list instead."
 }
-EXIT=0
+--- stderr
+--- exit
+0
