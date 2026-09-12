@@ -26,19 +26,28 @@ The agent never decides what the candidate set is. It only judges what is in it.
 
 ## Install
 
-Requires `ast-grep` on PATH and Python 3.9+. No Python dependencies.
-
 ```sh
-brew install ast-grep
-ln -s "$PWD/bin/codesweep" /usr/local/bin/codesweep   # or anywhere on PATH
-ln -s "$PWD/skills/codesweep" ~/.claude/skills/codesweep
+git clone https://github.com/boxabirds/codesweep.git
+cd codesweep
+./install.sh
 ```
 
-The second link is what matters: an agent reaches this through the skill, and
-the skill drives the CLI. Installing the directory as a plugin with
-`claude --plugin-dir .` works too. A skill installed at user level is available
-in every project, and Claude Code picks it up without a restart, though sessions
-already running will not see it until they are restarted.
+It links the CLI onto your PATH and the skill into `~/.claude/skills`, then
+checks that both actually work rather than assuming the links took. Re-running
+is safe: it reports what is already in place and changes only what is not. It
+will not overwrite anything that is not its own symlink.
+
+Needs `ast-grep` and Python 3.9 or newer. The installer checks for both and
+tells you how to get `ast-grep` if it is missing, rather than half-installing.
+
+```sh
+./install.sh --check      # report state, change nothing
+./install.sh --uninstall  # remove the links it created
+```
+
+The skill installs at user level, so it is available in every project. Claude
+Code picks it up without a restart, but sessions already open will not see it
+until they restart.
 
 ## Using it as a skill
 
@@ -275,6 +284,14 @@ The first version of this tool would have called that audit complete.
 ```sh
 tests/run-all.sh
 ```
+
+**`tests/test_install.sh`**, 27 assertions against temporary target directories,
+so it never touches the real `~/.claude` or PATH. A first install creating both
+links, a re-run changing nothing, a link pointing elsewhere being repointed and
+saying what it replaced, a real file where a link belongs being refused rather
+than overwritten, `--check` changing nothing, `--uninstall` removing its own
+links while leaving a foreign file alone, and installing not modifying any
+tracked file.
 
 **`tests/test_codesweep.sh`**, 58 assertions against a fixture with a
 hand-counted number of sites. Enumeration, rule narrowing, refused empty notes,
