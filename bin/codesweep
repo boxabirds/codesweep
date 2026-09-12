@@ -33,7 +33,7 @@ import textwrap
 import time
 from datetime import datetime, timezone
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # The index lives in a per-session temporary directory, never in the repository
 # being swept. A census rebuilds it in a fraction of a second, so there is
@@ -262,6 +262,15 @@ def connect(root: str, create: bool = False) -> sqlite3.Connection:
             note      TEXT NOT NULL,
             judged_at TEXT NOT NULL,
             PRIMARY KEY (sweep, site_id)
+        );
+        CREATE TABLE IF NOT EXISTS surface (
+            sweep                 TEXT NOT NULL,
+            name                  TEXT NOT NULL,
+            scope                 TEXT,
+            examined_at           TEXT,
+            declared_at           TEXT NOT NULL,
+            declared_after_census INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (sweep, name)
         );
         """
     )
@@ -622,6 +631,135 @@ def coverage(conn, name: str) -> dict:
         "unjudged": live - judged,
         "by_verdict": by_verdict,
     }
+
+
+# ---------------------------------------------------------------- surfaces
+
+# A surface is a named part of the system an audit intends to examine. Not
+# necessarily a directory: the audit this exists for enumerated, among others,
+# the secrets actually set in each deployed environment and the contents of
+# continuous integration, neither of which has a path in the repository, and one
+# of which held the largest finding of the exercise. So the name is the
+# identity and a scope is an optional convenience the tool never acts on.
+#
+# This answers a different question from the uncovered-extension warning. That
+# one asks whether the rules reached everything inside the scope. This asks
+# whether the scope reached everything in the system. Both are needed and
+# neither substitutes for the other, so they stay separate.
+
+
+def latest_census_id(conn, sweep: str) -> int:
+    """Which pass we are on, used to mark a surface as a late addition.
+
+    Zero means no census has run, so the surface was declared up front.
+    """
+    row = conn.execute(
+        "SELECT MAX(id) m FROM census_run WHERE sweep = ?", (sweep,)
+    ).fetchone()
+    return row["m"] or 0
+
+
+def surfaces_of(conn, sweep: str) -> list:
+    return [
+        dict(r)
+        for r in conn.execute(
+            "SELECT name, scope, examined_at, declared_after_census"
+            " FROM surface WHERE sweep = ? ORDER BY name",
+            (sweep,),
+        )
+    ]
+
+
+def surface_counts(conn, sweep: str) -> dict:
+    """Declared, examined, and the names still outstanding.
+
+    `declared_list` distinguishes a list that exists and is fully examined from
+    no list at all. Both produce zero outstanding, and if a caller cannot tell
+    them apart the absence of a list reads as completeness, which is the exact
+    failure this exists to remove.
+    """
+    rows = surfaces_of(conn, sweep)
+    unexamined = [r["name"] for r in rows if not r["examined_at"]]
+    # Late means added after further searching, not merely after the first
+    # census. A sweep does not exist until a census creates it, so the earliest
+    # possible declaration already follows one; treating that as late would
+    # mark every surface late and destroy the signal. The baseline is the pass
+    # the list was first written down on, and anything declared after a later
+    # pass grew the list.
+    baseline = min((r["declared_after_census"] for r in rows), default=0)
+    late = [r["name"] for r in rows if r["declared_after_census"] > baseline]
+    return {
+        "declared_list": bool(rows),
+        "surfaces_declared": len(rows),
+        "surfaces_examined": len(rows) - len(unexamined),
+        "surfaces_unexamined": unexamined,
+        "surfaces_added_late": late,
+    }
+
+
+def cmd_surfaces(args):
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    require_sweep(conn, args.name)
+
+    if args.propose:
+        die("proposing surfaces is not implemented yet")
+
+    def known() -> dict:
+        return {r["name"]: r for r in surfaces_of(conn, args.name)}
+
+    if args.add:
+        if not args.add.strip():
+            die("a surface needs a name")
+        if args.add in known():
+            # Refused rather than merged: two surfaces sharing a name make the
+            # coverage count mean nothing.
+            die(f"surface {args.add!r} is already declared")
+        after = latest_census_id(conn, args.name)
+        conn.execute(
+            "INSERT INTO surface (sweep, name, scope, examined_at, declared_at,"
+            " declared_after_census) VALUES (?,?,?,NULL,?,?)",
+            (args.name, args.add, args.scope, now(), after),
+        )
+        conn.commit()
+
+    for flag, sql, params in (
+        (args.remove, "DELETE FROM surface WHERE sweep = ? AND name = ?", None),
+        (args.examined, "UPDATE surface SET examined_at = ? WHERE sweep = ? AND name = ?", "mark"),
+        (args.unexamined, "UPDATE surface SET examined_at = NULL WHERE sweep = ? AND name = ?", None),
+    ):
+        if not flag:
+            continue
+        if flag not in known():
+            die(f"no surface named {flag!r} in sweep {args.name!r}")
+        if params == "mark":
+            conn.execute(sql, (now(), args.name, flag))
+        else:
+            conn.execute(sql, (args.name, flag))
+        conn.commit()
+
+    rows = surfaces_of(conn, args.name)
+    payload = {
+        "sweep": args.name,
+        "surfaces": [
+            {
+                "name": r["name"],
+                "scope": r["scope"],
+                "examined": bool(r["examined_at"]),
+                "added_after_census": r["declared_after_census"] or None,
+            }
+            for r in rows
+        ],
+    }
+    payload.update(surface_counts(conn, args.name))
+    if not rows:
+        payload["note"] = (
+            "No surfaces are declared. Coverage will be reported against the "
+            "scope given to the census, not against the system. Declare the "
+            "parts of the system this audit intends to examine and the claim "
+            "becomes relative to that list instead."
+        )
+    print(json.dumps(payload, indent=2))
 
 
 def cmd_status(args):
@@ -1056,6 +1194,20 @@ def main():
     p.add_argument("--note", default="")
     p.add_argument("--from-json", help="file of [{site_id,verdict,note}], or - for stdin")
     p.set_defaults(func=cmd_verdict)
+
+    p = sub.add_parser(
+        "surfaces",
+        parents=[root_opt],
+        help="declare which parts of the system this audit intends to examine",
+    )
+    p.add_argument("name")
+    p.add_argument("--propose", action="store_true", help="suggest surfaces from the repository")
+    p.add_argument("--add", help="declare a surface by name")
+    p.add_argument("--scope", help="optional path for the surface being added")
+    p.add_argument("--remove", help="undeclare a surface by name")
+    p.add_argument("--examined", help="mark a surface as examined")
+    p.add_argument("--unexamined", help="mark a surface as not examined after all")
+    p.set_defaults(func=cmd_surfaces)
 
     p = sub.add_parser("status", parents=[root_opt], help="coverage arithmetic for one sweep")
     p.add_argument("name")
