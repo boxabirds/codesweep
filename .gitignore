@@ -1,7 +1,7 @@
 .resweep/
 __pycache__/
 
-# Rust build output for the vendored crates
+# Rust build output
 /target
 
 # Scored runs are measurements, not source

@@ -1,0 +1,61 @@
+[package]
+name = "resweep"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "resweep"
+path = "src/lib.rs"
+
+[[bin]]
+name = "resweep"
+path = "src/main.rs"
+
+[dependencies]
+ast-grep-core = "0.45.3"
+ast-grep-config = "0.45.3"
+
+# The language set is chosen here rather than at runtime, so an unsupported
+# language is a fact the compiler knows. It is every language the Python tool
+# claims, minus scss: the crate has no scss grammar, and the CSS grammar parses
+# scss incompletely and without saying so, which is the exact failure this tool
+# exists to expose.
+#
+# tsx has no grammar of its own; it comes from tree-sitter-typescript. The
+# grammars the crate offers that the tool has never claimed are left out:
+# dart, hcl, markdown, nix and solidity. Grammars are almost the whole binary,
+# so each one costs about a megabyte and a half.
+[dependencies.ast-grep-language]
+version = "0.45.3"
+default-features = false
+features = [
+  "tree-sitter-bash",
+  "tree-sitter-c",
+  "tree-sitter-cpp",
+  "tree-sitter-c-sharp",
+  "tree-sitter-css",
+  "tree-sitter-elixir",
+  "tree-sitter-go",
+  "tree-sitter-haskell",
+  "tree-sitter-html",
+  "tree-sitter-java",
+  "tree-sitter-javascript",
+  "tree-sitter-json",
+  "tree-sitter-kotlin",
+  "tree-sitter-lua",
+  "tree-sitter-php",
+  "tree-sitter-python",
+  "tree-sitter-ruby",
+  "tree-sitter-rust",
+  "tree-sitter-scala",
+  "tree-sitter-swift",
+  "tree-sitter-typescript",
+  "tree-sitter-yaml",
+]
+
+[dev-dependencies]
+# Test-only. The oracle emits JSON and hand-rolling a parser for it produced a
+# wrong comparison on the first attempt: every match carries the key "text"
+# more than once, so a split on it counted each match twice and blamed the
+# engine for the parser's mistake.
+serde_json = "1"
