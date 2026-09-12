@@ -1,0 +1,6 @@
+[workspace]
+resolver = "2"
+members = ["crates/scanner-core"]
+
+[profile.release]
+opt-level = 3

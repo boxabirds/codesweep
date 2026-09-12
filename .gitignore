@@ -1,2 +1,5 @@
 .codesweep/
 __pycache__/
+
+# Rust build output for the vendored crates
+/target
