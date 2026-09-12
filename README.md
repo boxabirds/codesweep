@@ -1,15 +1,15 @@
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/icon-dark.svg">
-  <img src="assets/icon.svg" alt="codesweep" width="120" align="right">
+  <img src="assets/icon.svg" alt="resweep" width="120" align="right">
 </picture>
 
-# codesweep
+# resweep
 
 **Auditing and refactoring safely means knowing every place a change has to
 land. Coding agents don't know.** They read some files and tell you what they
 found. They can't tell you what they missed, and neither can you.
 
-codesweep makes the candidate set countable. `ast-grep` enumerates every site
+resweep makes the candidate set countable. `ast-grep` enumerates every site
 matching a rule, the agent judges them one at a time, and coverage becomes
 arithmetic instead of a claim you have to take on trust.
 
@@ -35,7 +35,7 @@ helps you or wastes your time.
 normal way to sweep a codebase is to search, fix what you find, search again
 with a different pattern, and stop when nothing new turns up. That stopping
 point is a statement about running out of ideas, not about the codebase running
-out of instances. codesweep fixes the candidate set before any judging starts,
+out of instances. resweep fixes the candidate set before any judging starts,
 so what is left is subtraction.
 
 **A candidate set you can cite.** After a sweep there is a list of every site,
@@ -99,8 +99,8 @@ positives. Expect a second failure mode after this one is gone, and treat a
 ## Install
 
 ```sh
-git clone https://github.com/boxabirds/codesweep.git
-cd codesweep
+git clone https://github.com/boxabirds/resweep.git
+cd resweep
 ./install.sh
 ```
 
@@ -164,7 +164,7 @@ they are the cases ast-grep cannot serve, because it does no scope or type
 analysis and cannot tell one `save` from another `save` in a different scope.
 That needs a language server. Before the description said so, renames fired.
 
-You can still force it with `/codesweep`, or skip the skill and drive the CLI
+You can still force it with `/resweep`, or skip the skill and drive the CLI
 yourself.
 
 ## User journey
@@ -194,7 +194,7 @@ rule:
 
 Deliberately dumb: it selects candidates, it decides nothing. Then the
 cross-check the skill insists on. Ripgrep counted 19 catch lines in `lib/`,
-codesweep found 18.
+resweep found 18.
 
 That gap is not waved through. The extra line was
 `asyncExecutor(...).catch(_reject)`, a promise method that matches the regex and
@@ -290,14 +290,14 @@ Sixteen passes is also a result. The tool did not manufacture findings.
 ## Driving the CLI directly
 
 ```sh
-codesweep census my-audit --rule rules/css-literal-colour.yml --scope src \
+resweep census my-audit --rule rules/css-literal-colour.yml --scope src \
   --question "Is this literal colour a design-system violation?"
-codesweep manifest my-audit               # every site, one line, the citable record
-codesweep next my-audit --limit 15        # unjudged sites with source context
-codesweep verdict my-audit --from-json -  # [{site_id, verdict, note}]
-codesweep show my-audit --site <id>       # re-read one site after judging
-codesweep status my-audit                 # coverage arithmetic
-codesweep report my-audit -o audit.md
+resweep manifest my-audit               # every site, one line, the citable record
+resweep next my-audit --limit 15        # unjudged sites with source context
+resweep verdict my-audit --from-json -  # [{site_id, verdict, note}]
+resweep show my-audit --site <id>       # re-read one site after judging
+resweep status my-audit                 # coverage arithmetic
+resweep report my-audit -o audit.md
 ```
 
 Pass `--root` on every call. It names the repository being swept, and a relative
@@ -309,8 +309,8 @@ because a verdict without a reason is not a judgement.
 ## Where the index lives, and for how long
 
 In a per-session temporary directory keyed by `CLAUDE_CODE_SESSION_ID`, never in
-the repository being swept. Set `CODESWEEP_SESSION_ID` to run outside a session.
-With neither, codesweep refuses rather than falling back to a shared location,
+the repository being swept. Set `RESWEEP_SESSION_ID` to run outside a session.
+With neither, resweep refuses rather than falling back to a shared location,
 because two unrelated runs sharing one index would silently merge their
 candidate sets.
 
@@ -397,7 +397,7 @@ than overwritten, `--check` changing nothing, `--uninstall` removing its own
 links while leaving a foreign file alone, and installing not modifying any
 tracked file.
 
-**`tests/test_codesweep.sh`**, 58 assertions against a fixture with a
+**`tests/test_resweep.sh`**, 58 assertions against a fixture with a
 hand-counted number of sites. Enumeration, rule narrowing, refused empty notes,
 refused unknown site ids, coverage arithmetic, verdict survival across
 reformatting, re-judging after a real edit, site departure on file deletion, the

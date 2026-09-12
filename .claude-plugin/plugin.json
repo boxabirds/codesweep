@@ -1,6 +1,6 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
-  "name": "codesweep",
+  "name": "resweep",
   "version": "0.1.0",
   "description": "Whole-codebase audits that are provably complete: ast-grep enumerates every candidate site, the agent judges each one, and coverage is arithmetic rather than a stopping heuristic.",
   "author": {

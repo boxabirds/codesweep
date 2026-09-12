@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for install.sh. Every case runs against temporary target directories via
-# CODESWEEP_BIN_DIR and CODESWEEP_SKILL_DIR, so nothing here touches the real
+# RESWEEP_BIN_DIR and RESWEEP_SKILL_DIR, so nothing here touches the real
 # ~/.claude or anything on PATH.
 set -uo pipefail
 
@@ -36,7 +36,7 @@ trap cleanup EXIT
 
 run() {
   # Run install.sh against this test's target directories, never the real ones.
-  CODESWEEP_BIN_DIR="$1/bin" CODESWEEP_SKILL_DIR="$1/skills" "$INSTALL" "${2:-}" 2>&1
+  RESWEEP_BIN_DIR="$1/bin" RESWEEP_SKILL_DIR="$1/skills" "$INSTALL" "${2:-}" 2>&1
 }
 
 # --- a first install creates both links -------------------------------------
@@ -44,50 +44,50 @@ run() {
 echo "a first install creates both links"
 A="$WORK/first"
 OUT="$(run "$A")"
-check "cli linked"            "True" "$([ -L "$A/bin/codesweep" ] && echo True || echo False)"
-check "skill linked"          "True" "$([ -L "$A/skills/codesweep" ] && echo True || echo False)"
-check "skill is readable"     "True" "$([ -f "$A/skills/codesweep/SKILL.md" ] && echo True || echo False)"
-check "cli link is executable" "True" "$([ -x "$A/bin/codesweep" ] && echo True || echo False)"
+check "cli linked"            "True" "$([ -L "$A/bin/resweep" ] && echo True || echo False)"
+check "skill linked"          "True" "$([ -L "$A/skills/resweep" ] && echo True || echo False)"
+check "skill is readable"     "True" "$([ -f "$A/skills/resweep/SKILL.md" ] && echo True || echo False)"
+check "cli link is executable" "True" "$([ -x "$A/bin/resweep" ] && echo True || echo False)"
 check "reports two changes"   2 "$(printf '%s\n' "$OUT" | grep -c 'done')"
 
 # --- re-running changes nothing ---------------------------------------------
 
 echo "re-running is idempotent"
-BEFORE_CLI="$(readlink "$A/bin/codesweep")"
-BEFORE_SKILL="$(readlink "$A/skills/codesweep")"
+BEFORE_CLI="$(readlink "$A/bin/resweep")"
+BEFORE_SKILL="$(readlink "$A/skills/resweep")"
 OUT="$(run "$A")"
 check "no further changes"     0 "$(printf '%s\n' "$OUT" | grep -c 'done')"
 check "says nothing to do" "True" "$(printf '%s' "$OUT" | grep -q 'already installed' && echo True || echo False)"
-check "cli link unchanged"   "$BEFORE_CLI"   "$(readlink "$A/bin/codesweep")"
-check "skill link unchanged" "$BEFORE_SKILL" "$(readlink "$A/skills/codesweep")"
+check "cli link unchanged"   "$BEFORE_CLI"   "$(readlink "$A/bin/resweep")"
+check "skill link unchanged" "$BEFORE_SKILL" "$(readlink "$A/skills/resweep")"
 
 # --- a link pointing elsewhere is repointed ---------------------------------
 
 echo "a link pointing somewhere else is repointed, and says so"
-ln -sfn /dev/null "$A/bin/codesweep"
+ln -sfn /dev/null "$A/bin/resweep"
 OUT="$(run "$A")"
 check "repointed"          "True" "$(printf '%s' "$OUT" | grep -q 'repointed' && echo True || echo False)"
 check "names the old target" "True" "$(printf '%s' "$OUT" | grep -q '/dev/null' && echo True || echo False)"
-check "now points at source" "$BEFORE_CLI" "$(readlink "$A/bin/codesweep")"
+check "now points at source" "$BEFORE_CLI" "$(readlink "$A/bin/resweep")"
 
 # --- a real file is never clobbered -----------------------------------------
 
 echo "a real file where a link should go is refused, not overwritten"
 B="$WORK/occupied"
 mkdir -p "$B/bin"
-printf 'a file that is not ours\n' > "$B/bin/codesweep"
+printf 'a file that is not ours\n' > "$B/bin/resweep"
 OUT="$(run "$B")"
 RC=$?
 check "exits non-zero"        1 "$RC"
 check "says not a symlink" "True" "$(printf '%s' "$OUT" | grep -q 'not a symlink' && echo True || echo False)"
-check "file left intact" "a file that is not ours" "$(cat "$B/bin/codesweep")"
+check "file left intact" "a file that is not ours" "$(cat "$B/bin/resweep")"
 
 # --- check mode changes nothing ---------------------------------------------
 
 echo "--check reports state without changing it"
 C="$WORK/checkonly"
 OUT="$(run "$C" --check)"
-check "no links created"  "False" "$([ -e "$C/bin/codesweep" ] && echo True || echo False)"
+check "no links created"  "False" "$([ -e "$C/bin/resweep" ] && echo True || echo False)"
 check "reports missing"    "True" "$(printf '%s' "$OUT" | grep -q 'not linked' && echo True || echo False)"
 check "no changes claimed"     0 "$(printf '%s\n' "$OUT" | grep -c 'done')"
 
@@ -95,13 +95,13 @@ check "no changes claimed"     0 "$(printf '%s\n' "$OUT" | grep -c 'done')"
 
 echo "--uninstall removes only the links it created"
 OUT="$(run "$A" --uninstall)"
-check "cli link gone"   "False" "$([ -L "$A/bin/codesweep" ] && echo True || echo False)"
-check "skill link gone" "False" "$([ -L "$A/skills/codesweep" ] && echo True || echo False)"
+check "cli link gone"   "False" "$([ -L "$A/bin/resweep" ] && echo True || echo False)"
+check "skill link gone" "False" "$([ -L "$A/skills/resweep" ] && echo True || echo False)"
 check "reports two removals" 2 "$(printf '%s\n' "$OUT" | grep -c 'removed:')"
 
 echo "--uninstall leaves a foreign file alone"
 OUT="$(run "$B" --uninstall)"
-check "foreign file survives" "a file that is not ours" "$(cat "$B/bin/codesweep")"
+check "foreign file survives" "a file that is not ours" "$(cat "$B/bin/resweep")"
 check "says it left it alone" "True" "$(printf '%s' "$OUT" | grep -q 'leaving it alone' && echo True || echo False)"
 
 echo "--uninstall twice is a no-op"

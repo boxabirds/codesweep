@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install codesweep: the CLI on PATH, and the skill where Claude Code finds it.
+# Install resweep: the CLI on PATH, and the skill where Claude Code finds it.
 #
 # Idempotent. Re-running reports what is already in place and changes only what
 # is not. Nothing is overwritten without saying so, and a real file sitting
@@ -10,13 +10,13 @@
 #   ./install.sh --check      report state and exit, changing nothing
 #
 # Overrides, mostly for tests:
-#   CODESWEEP_BIN_DIR    where the CLI symlink goes
-#   CODESWEEP_SKILL_DIR  where the skill symlink goes
+#   RESWEEP_BIN_DIR    where the CLI symlink goes
+#   RESWEEP_SKILL_DIR  where the skill symlink goes
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CLI_SOURCE="$HERE/bin/codesweep"
-SKILL_SOURCE="$HERE/skills/codesweep"
+CLI_SOURCE="$HERE/bin/resweep"
+SKILL_SOURCE="$HERE/skills/resweep"
 
 # Minimum Python that supports the syntax and stdlib this CLI uses.
 MIN_PY_MAJOR=3
@@ -42,8 +42,8 @@ esac
 # ---------------------------------------------------------------- where things go
 
 pick_bin_dir() {
-  if [ -n "${CODESWEEP_BIN_DIR:-}" ]; then
-    printf '%s' "$CODESWEEP_BIN_DIR"
+  if [ -n "${RESWEEP_BIN_DIR:-}" ]; then
+    printf '%s' "$RESWEEP_BIN_DIR"
     return
   fi
   # Prefer a directory already on PATH and writable, so the install works
@@ -61,9 +61,9 @@ pick_bin_dir() {
 }
 
 BIN_DIR="$(pick_bin_dir)"
-SKILL_DIR="${CODESWEEP_SKILL_DIR:-$HOME/.claude/skills}"
-CLI_LINK="$BIN_DIR/codesweep"
-SKILL_LINK="$SKILL_DIR/codesweep"
+SKILL_DIR="${RESWEEP_SKILL_DIR:-$HOME/.claude/skills}"
+CLI_LINK="$BIN_DIR/resweep"
+SKILL_LINK="$SKILL_DIR/resweep"
 
 # ---------------------------------------------------------------- dependencies
 
@@ -81,7 +81,7 @@ check_dependencies() {
     else
       say "     install it from: https://ast-grep.github.io/guide/quick-start.html"
     fi
-    say "     codesweep will not run without it, and will not fall back to a"
+    say "     resweep will not run without it, and will not fall back to a"
     say "     text search, because a text search cannot give the guarantee it exists to provide."
   fi
 
@@ -155,10 +155,10 @@ verify() {
     chmod +x "$CLI_SOURCE" 2>/dev/null && did "made $CLI_SOURCE executable"
   fi
 
-  # Exercise the link this script made, not whatever `codesweep` PATH happens
+  # Exercise the link this script made, not whatever `resweep` PATH happens
   # to resolve to. Checking PATH first would let a pre-existing install
   # elsewhere report success for a link that never took.
-  if [ -x "$CLI_LINK" ] && CODESWEEP_SESSION_ID="install-check" "$CLI_LINK" --help >/dev/null 2>&1; then
+  if [ -x "$CLI_LINK" ] && RESWEEP_SESSION_ID="install-check" "$CLI_LINK" --help >/dev/null 2>&1; then
     ok "cli runs: $CLI_LINK"
   else
     bad "cli did not run at $CLI_LINK"
@@ -167,21 +167,21 @@ verify() {
   # Reachability by bare name is separate, and is about PATH rather than the link.
   case ":$PATH:" in
     *":$BIN_DIR:"*)
-      if command -v codesweep >/dev/null 2>&1; then
+      if command -v resweep >/dev/null 2>&1; then
         local resolved
-        resolved="$(command -v codesweep)"
+        resolved="$(command -v resweep)"
         if [ "$resolved" = "$CLI_LINK" ]; then
-          ok "on PATH as: codesweep"
+          ok "on PATH as: resweep"
         else
-          say "     note: \`codesweep\` resolves to $resolved, an earlier install"
+          say "     note: \`resweep\` resolves to $resolved, an earlier install"
           say "     ahead of $BIN_DIR on PATH. Remove it or reorder PATH."
         fi
       else
-        bad "$BIN_DIR is on PATH but codesweep is not resolvable"
+        bad "$BIN_DIR is on PATH but resweep is not resolvable"
       fi
       ;;
     *)
-      bad "$BIN_DIR is not on PATH, so \`codesweep\` will not resolve"
+      bad "$BIN_DIR is not on PATH, so \`resweep\` will not resolve"
       say "     add it:  echo 'export PATH=\"$BIN_DIR:\$PATH\"' >> ~/.zshrc && exec zsh"
       ;;
   esac
@@ -198,12 +198,12 @@ verify() {
 echo
 case "$MODE" in
   uninstall)
-    echo "removing codesweep"
+    echo "removing resweep"
     unlink_if_ours "$CLI_LINK" "$CLI_SOURCE" "cli"
     unlink_if_ours "$SKILL_LINK" "$SKILL_SOURCE" "skill"
     echo
     say "The repository itself is untouched. Session indexes under"
-    say "\$TMPDIR/codesweep are removed by age, or delete that directory now."
+    say "\$TMPDIR/resweep are removed by age, or delete that directory now."
     ;;
 
   check)

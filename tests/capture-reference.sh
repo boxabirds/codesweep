@@ -12,10 +12,10 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-compare}"
 OUT="$HERE/reference"
-TOOL="${RESWEEP_BIN:-$HERE/../bin/codesweep}"
+TOOL="${RESWEEP_BIN:-$HERE/../bin/resweep}"
 
-export CODESWEEP_SESSION_ID="reference-$$-$(date +%s)"
-SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "codesweep", os.environ["CODESWEEP_SESSION_ID"]))')"
+export RESWEEP_SESSION_ID="reference-$$-$(date +%s)"
+SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "resweep", os.environ["RESWEEP_SESSION_ID"]))')"
 WORK="$(mktemp -d)"
 RULES="$(mktemp -d)"
 cleanup() { rm -rf "$WORK" "$RULES" "$SESSION_DIR"; }
@@ -35,6 +35,10 @@ printf 'export function b() { try { x(); } catch (e) { throw e; } }\n' > src/b.t
 git add -A >/dev/null 2>&1
 git -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1
 
+# The old name below is deliberate and must survive a future rename: this
+# scrubber has to normalise both names for a comparison that spans one. A bulk
+# substitution ate it once already, leaving the pattern matching one name twice.
+#
 # Timestamps, temporary paths and the tool's own name are the only things
 # allowed to vary. Everything else, including counts, ordering, identities and
 # wording, is the thing under comparison.
@@ -44,7 +48,7 @@ scrub() {
     -e "s#$WORK#WORK#g" -e "s#$RULES#RULES#g" -e "s#$SESSION_DIR#SESSION#g" \
     -e 's#/var/folders/[^ "]*#TMP#g' -e 's#/private/tmp/[^ "]*#TMP#g' \
     -e 's#\.\./tmp\.[A-Za-z0-9]+#TMPREL#g' \
-    -e 's/\b(codesweep|resweep)\b/TOOLNAME/g'
+    -e 's/(codesweep|resweep)/TOOLNAME/g'
 }
 
 run() {

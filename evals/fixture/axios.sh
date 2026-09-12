@@ -12,7 +12,7 @@ UPSTREAM=https://github.com/axios/axios.git
 # $HOME is remapped for the run, so the operator's cache is found through the
 # user database rather than through the environment.
 REAL_HOME=$(eval echo "~$(id -un)")
-CACHE=${CODESWEEP_FIXTURE_DIR:-$REAL_HOME/.cache/github/axios/axios}
+CACHE=${RESWEEP_FIXTURE_DIR:-$REAL_HOME/.cache/github/axios/axios}
 
 if [ -d "$CACHE/.git" ]; then
   # --no-hardlinks on purpose. A local clone links by default, and hard links

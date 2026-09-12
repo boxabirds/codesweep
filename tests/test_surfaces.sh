@@ -7,7 +7,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-CODESWEEP="$HERE/../bin/codesweep"
+RESWEEP="$HERE/../bin/resweep"
 PASS=0
 FAIL=0
 
@@ -24,8 +24,8 @@ check() {
 
 jqp() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 
-export CODESWEEP_SESSION_ID="surfaces-$$-$(date +%s)"
-SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "codesweep", os.environ["CODESWEEP_SESSION_ID"]))')"
+export RESWEEP_SESSION_ID="surfaces-$$-$(date +%s)"
+SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "resweep", os.environ["RESWEEP_SESSION_ID"]))')"
 
 WORK="$(mktemp -d)"
 RULES="$(mktemp -d)"
@@ -59,7 +59,7 @@ printf 'export function v() { try { c(); } catch (e) { throw e; } }\n' > node_mo
 git add -A >/dev/null 2>&1
 git -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1
 
-cs() { "$CODESWEEP" "$@" --root "$WORK"; }
+cs() { "$RESWEEP" "$@" --root "$WORK"; }
 
 printf '\nthe list starts empty, and an empty list is not a complete one\n'
 cs census s --rule "$RULES/catch.yml" --scope packages/api/src --question "swallowed?" >/dev/null 2>&1

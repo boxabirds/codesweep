@@ -6,7 +6,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-CODESWEEP="$HERE/../bin/codesweep"
+RESWEEP="$HERE/../bin/resweep"
 PASS=0
 FAIL=0
 
@@ -23,8 +23,8 @@ check() {
 
 jqp() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
 
-export CODESWEEP_SESSION_ID="recheck-$$-$(date +%s)"
-SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "codesweep", os.environ["CODESWEEP_SESSION_ID"]))')"
+export RESWEEP_SESSION_ID="recheck-$$-$(date +%s)"
+SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "resweep", os.environ["RESWEEP_SESSION_ID"]))')"
 WORK="$(mktemp -d)"
 RULES="$(mktemp -d)"
 cleanup() { rm -rf "$WORK" "$RULES" "$SESSION_DIR"; }
@@ -50,7 +50,7 @@ printf 'export function h() { try { a(); } catch (e) { console.warn(e); } }\n' >
 git add -A >/dev/null 2>&1
 git -c user.email=t@t -c user.name=t commit -qm fixture >/dev/null 2>&1
 
-cs() { "$CODESWEEP" "$@" --root "$WORK"; }
+cs() { "$RESWEEP" "$@" --root "$WORK"; }
 cs census s --rule "$RULES/catch.yml" --scope src --question "swallowed?" >/dev/null 2>&1
 
 IDS="$(cs next s --limit 20 | python3 -c "import json,sys; [print(x['site_id']) for x in json.load(sys.stdin)['sites']]")"

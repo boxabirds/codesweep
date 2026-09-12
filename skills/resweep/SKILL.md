@@ -1,9 +1,9 @@
 ---
-name: codesweep
+name: resweep
 description: Find every place matching some condition, anywhere in a codebase or in one directory of it, and get a complete count instead of a search repeated until it goes quiet. Use when the answer is a set whose size you need to trust: every hardcoded colour, every swallowed error, every violation of a project rule or convention, everywhere a deprecated thing is still used. Use it even when the user does not say every or all - a plural question about violations wants the whole set, not examples. Also use to plan a refactor that must touch every affected site, and to check whether a past change reached them all. Do NOT use for reading a single file, for open-ended exploration, or when one search for one pattern already gives the exact answer: a single literal string with one spelling stays a grep however many times it occurs, even when the thing is deprecated. Do NOT use when the answer depends on which declaration a name refers to - callers of a common method, renames, what breaks if I delete this - even when framed as a refactor touching every site; that needs a language server, not this.
 ---
 
-# codesweep
+# resweep
 
 ## Why this exists
 
@@ -17,7 +17,7 @@ This is measured, not folklore. On multi-file tasks the dominant published
 failure mode is incomplete refactoring: agents change some affected sites and
 never reach the rest.
 
-codesweep removes the choice. `ast-grep` enumerates every candidate site from a
+resweep removes the choice. `ast-grep` enumerates every candidate site from a
 declared rule. You judge the sites it hands you, one at a time. Coverage becomes
 subtraction.
 
@@ -30,7 +30,7 @@ dataflow analysis. Given a top-level `save()`, a shadowed local `save()` inside
 another function, and `obj.save()`, the pattern `save($A)` matches the first two
 identically and misses the third. So a sweep is complete with respect to a
 **syntactic shape**, never with respect to a **symbol**. If the question is
-genuinely "every call site of this function", codesweep is the wrong tool and a
+genuinely "every call site of this function", resweep is the wrong tool and a
 language server's find-references is the right one.
 
 **Complete enumeration does not buy correct judgement.** A well-tuned LLM judge
@@ -50,7 +50,7 @@ Write the audit question as a sentence a person could answer about one site.
 "Which of these catch clauses swallows an error the caller needed to see?" is
 answerable per site. "Is our error handling any good?" is not.
 
-If the question cannot be answered about a single site in isolation, codesweep is
+If the question cannot be answered about a single site in isolation, resweep is
 the wrong tool. Say so rather than forcing it.
 
 ### 2. Write the census rule
@@ -113,7 +113,7 @@ across .ts and .tsx" is evidence. "The rule looks right" is not.
 ### 4. Census
 
 ```bash
-codesweep --root /abs/path/to/repo census <sweep-name> \
+resweep --root /abs/path/to/repo census <sweep-name> \
   --rule rules/ts-catch-clause.yml \
   --rule rules/tsx-catch-clause.yml \
   --scope src \
@@ -140,7 +140,7 @@ the operator's repo.
 ### 5. Take the manifest, before judging anything
 
 ```bash
-codesweep --root /abs/path/to/repo manifest <sweep-name>
+resweep --root /abs/path/to/repo manifest <sweep-name>
 ```
 
 This lists every candidate as one line, grouped under its file. Do this
@@ -159,14 +159,14 @@ again. The index is still there and the site ids are unchanged.
 ### 6. Drain the queue
 
 ```bash
-codesweep --root /abs/path/to/repo next <sweep-name> --limit 15
+resweep --root /abs/path/to/repo next <sweep-name> --limit 15
 ```
 
 This returns unjudged sites with surrounding source. Judge each one, then record
 the whole batch:
 
 ```bash
-codesweep --root /abs/path/to/repo verdict <sweep-name> --from-json - <<'JSON'
+resweep --root /abs/path/to/repo verdict <sweep-name> --from-json - <<'JSON'
 [
   {"site_id": "a1b2c3d4e5f6a7b8", "verdict": "violation",
    "note": "Catches the D1 error and returns an empty array, so a caller cannot distinguish an empty table from a failed query."},
@@ -193,7 +193,7 @@ marking the correct end `na` hides it. The note is where the chain lives.
 To revisit a site after it has left the queue:
 
 ```bash
-codesweep --root /abs/path/to/repo show <sweep-name> --site <site_id>
+resweep --root /abs/path/to/repo show <sweep-name> --site <site_id>
 ```
 
 Loop `next` then `verdict` until `next` returns no sites. This is the part that
@@ -203,8 +203,8 @@ happened to see.
 ### 7. Report
 
 ```bash
-codesweep --root /abs/path/to/repo status <sweep-name>
-codesweep --root /abs/path/to/repo report <sweep-name> -o <path>.md
+resweep --root /abs/path/to/repo status <sweep-name>
+resweep --root /abs/path/to/repo report <sweep-name> -o <path>.md
 ```
 
 `status` prints `live_sites`, `judged` and `unjudged`. The report states the
@@ -283,6 +283,6 @@ configuration so that claim becomes a gate rather than a memory.
 
 ## Requirements
 
-`ast-grep` on PATH (`brew install ast-grep`). codesweep refuses to run without
+`ast-grep` on PATH (`brew install ast-grep`). resweep refuses to run without
 it rather than falling back to a text search, because a text search cannot give
 the guarantee this whole tool exists to provide.

@@ -14,7 +14,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
-CODESWEEP="$HERE/../bin/codesweep"
+RESWEEP="$HERE/../bin/resweep"
 RULES="$HERE/../rules"
 REPO="${CEETRIX_REPO:-$HOME/expts/claude-backlog}"
 SCOPE="workers/admin/src"
@@ -42,15 +42,15 @@ if [ ! -d "$REPO/$SCOPE" ]; then
 fi
 command -v rg >/dev/null 2>&1 || { echo "SKIP: ripgrep is needed as the independent oracle"; exit 0; }
 
-export CODESWEEP_SESSION_ID="ceetrix-test-$$-$(date +%s)"
-SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "codesweep", os.environ["CODESWEEP_SESSION_ID"]))')"
+export RESWEEP_SESSION_ID="ceetrix-test-$$-$(date +%s)"
+SESSION_DIR="$(python3 -c 'import os,tempfile; print(os.path.join(tempfile.gettempdir(), "resweep", os.environ["RESWEEP_SESSION_ID"]))')"
 trap 'rm -rf "$SESSION_DIR"' EXIT
 
 echo "sweeping $REPO/$SCOPE"
 
 # --- the combined sweep, both languages ------------------------------------
 
-BOTH=$("$CODESWEEP" --root "$REPO" census both \
+BOTH=$("$RESWEEP" --root "$REPO" census both \
   --rule "$RULES/ts-catch-clause.yml" \
   --rule "$RULES/tsx-catch-clause.yml" \
   --scope "$SCOPE" \
@@ -74,7 +74,7 @@ printf '       ast=%s rg=%s delta=%s (delta is comments and strings rg cannot ex
 # --- the tsx language trap -------------------------------------------------
 
 echo "a typescript-only rule silently misses .tsx, and says so"
-TS_ONLY=$("$CODESWEEP" --root "$REPO" census tsonly \
+TS_ONLY=$("$RESWEEP" --root "$REPO" census tsonly \
   --rule "$RULES/ts-catch-clause.yml" --scope "$SCOPE" \
   --question "Does this catch clause swallow a failure the caller needed to see?")
 TS_N=$(echo "$TS_ONLY" | jqp 'd["sites_found"]')
@@ -82,7 +82,7 @@ check "typescript-only finds fewer" "True" "$([ "$TS_N" -lt "$BOTH_N" ] && echo 
 check "and warns about .tsx" "True" \
   "$(echo "$TS_ONLY" | jqp "'.tsx' in d.get('WARNING_uncovered_extensions', {})")"
 
-TSX_ONLY=$("$CODESWEEP" --root "$REPO" census tsxonly \
+TSX_ONLY=$("$RESWEEP" --root "$REPO" census tsxonly \
   --rule "$RULES/tsx-catch-clause.yml" --scope "$SCOPE" \
   --question "Does this catch clause swallow a failure the caller needed to see?")
 TSX_N=$(echo "$TSX_ONLY" | jqp 'd["sites_found"]')
@@ -96,7 +96,7 @@ check "ts + tsx = both" "$BOTH_N" "$((TS_N + TSX_N))"
 # --- determinism -----------------------------------------------------------
 
 echo "a repeated census over unchanged code is a no-op"
-AGAIN=$("$CODESWEEP" --root "$REPO" census both \
+AGAIN=$("$RESWEEP" --root "$REPO" census both \
   --rule "$RULES/ts-catch-clause.yml" --rule "$RULES/tsx-catch-clause.yml" \
   --scope "$SCOPE")
 check "no new sites"      0 "$(echo "$AGAIN" | jqp 'd["sites_new"]')"
@@ -106,7 +106,7 @@ check "same total"        "$BOTH_N" "$(echo "$AGAIN" | jqp 'd["sites_found"]')"
 # --- the manifest ----------------------------------------------------------
 
 echo "the manifest is the complete citable record"
-MAN=$("$CODESWEEP" --root "$REPO" manifest both)
+MAN=$("$RESWEEP" --root "$REPO" manifest both)
 check "manifest rows equal census count" "$BOTH_N" \
   "$(printf '%s\n' "$MAN" | grep -cE '^  [0-9a-f]{16}  ')"
 check "every row has a distinct id" "$BOTH_N" \
@@ -146,8 +146,8 @@ check "rows pointing past end of file" 0 "$BAD"
 # --- the repository is left alone ------------------------------------------
 
 echo "nothing is written into the repository being swept"
-check "no .codesweep directory created" "False" \
-  "$([ -e "$REPO/.codesweep" ] && echo True || echo False)"
+check "no .resweep directory created" "False" \
+  "$([ -e "$REPO/.resweep" ] && echo True || echo False)"
 check "index is in the session temp dir" "True" \
   "$(ls "$SESSION_DIR"/*.db >/dev/null 2>&1 && echo True || echo False)"
 
@@ -160,14 +160,14 @@ fi
 # --- a second language, to prove the guard is not tsx-specific -------------
 
 echo "a css rule over a mixed directory reports what it could not reach"
-CSS=$("$CODESWEEP" --root "$REPO" census css \
+CSS=$("$RESWEEP" --root "$REPO" census css \
   --rule "$RULES/css-literal-colour.yml" --scope apps/web/src \
   --question "Is this literal colour a design-system violation?" 2>/dev/null)
 if [ -n "$CSS" ]; then
   check "css sweep warns about unreached source" "True" \
     "$(echo "$CSS" | jqp "bool(d.get('WARNING_uncovered_extensions'))")"
   check "and status refuses to call it complete" "False" \
-    "$("$CODESWEEP" --root "$REPO" status css | jqp 'd["complete"]')"
+    "$("$RESWEEP" --root "$REPO" status css | jqp 'd["complete"]')"
 fi
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"

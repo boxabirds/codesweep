@@ -1,4 +1,4 @@
-.codesweep/
+.resweep/
 __pycache__/
 
 # Rust build output for the vendored crates
@@ -6,3 +6,4 @@ __pycache__/
 
 # Scored runs are measurements, not source
 evals/results/
+.DS_Store
