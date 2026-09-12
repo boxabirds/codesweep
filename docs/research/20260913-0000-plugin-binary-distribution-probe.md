@@ -92,6 +92,20 @@ a manifest and a README telling the operator to install the server with rustup,
 Homebrew, apt or a release download. Where the first-party plugins had this exact
 problem, they chose not to ship the binary.
 
+## What is checked, and what is only recorded
+
+`tests/test_plugin_payload.sh` re-runs the first and third questions on every
+suite run: it builds a plugin around an executable, installs it through the host,
+confirms the mode and bytes survive and the plugin-relative path runs, and then
+declares a platform this machine is not and shows the plugin installs and runs
+regardless. If a future host gains a selection mechanism, that last check fails
+and the design gets revisited.
+
+The size figures are not in the suite. They need two full release builds of a
+crate that links every tree-sitter grammar, which is minutes of compilation for a
+number that changes only when the dependency does. They are recorded here instead
+and should be re-measured when the port pins its versions.
+
 ## Consequence for the design
 
 The plugin is not the delivery channel for the build. Three shapes remain:
