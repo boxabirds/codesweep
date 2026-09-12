@@ -1,0 +1,7 @@
+# Every catch clause is a candidate for a silent fallback: the question of
+# whether it swallows an error or re-raises it is semantic, so enumeration
+# hands the whole set to a judge rather than guessing which ones matter.
+id: tsx-catch-clause
+language: tsx
+rule:
+  kind: catch_clause

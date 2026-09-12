@@ -1,0 +1,928 @@
+#!/usr/bin/env python3
+"""codesweep - deterministic enumeration + judgement ledger for whole-codebase audits.
+
+The problem this exists to solve: an agent asked to audit a codebase decides for
+itself which files to look at, so the candidate set is unknowable and the sweep is
+never provably complete. Repeating the sweep until the agent stops finding things
+is a stopping heuristic, not a coverage guarantee.
+
+codesweep splits the two halves:
+
+  census   ast-grep enumerates every candidate site. Deterministic. Countable.
+           The agent does not choose the set.
+  verdict  the agent judges one site at a time. Every judgement is recorded
+           against a stable site id.
+  status   coverage is arithmetic: live sites minus judged sites. Not a feeling.
+
+The completeness claim is always relative to the census rules, and `report`
+states those rules so the claim can never be overstated.
+
+Stdlib only. Requires the `ast-grep` binary on PATH.
+"""
+
+import argparse
+import hashlib
+import json
+import os
+import shutil
+import sqlite3
+import subprocess
+import sys
+import textwrap
+from datetime import datetime, timezone
+
+SCHEMA_VERSION = 1
+
+# Site ids are truncated sha256. 16 hex chars = 64 bits, which keeps collision
+# probability negligible for the site counts a single repo produces while staying
+# short enough for an agent to pass around in a JSON payload.
+SITE_ID_HEX_CHARS = 16
+
+# How much of a matched node to keep in the ledger. Long matches (a whole class)
+# would otherwise bloat the database; the full text is always re-readable from
+# disk via the recorded line range.
+MAX_EXCERPT_CHARS = 2000
+
+# Lines of surrounding source handed to the agent with each site to judge.
+DEFAULT_CONTEXT_LINES = 8
+
+# Sites handed out per `next` call. Small enough that a batch of judgements fits
+# comfortably in one agent turn alongside the reasoning for each.
+DEFAULT_BATCH_SIZE = 15
+
+VERDICTS = ("violation", "pass", "na")
+
+STATE_LIVE = "live"
+STATE_GONE = "gone"
+
+# Which file extensions each ast-grep language actually covers. This exists for
+# one reason: ast-grep treats `tsx` as a language separate from `typescript`, so
+# a rule declaring `language: typescript` silently skips every .tsx file. A sweep
+# built on such a rule drains its queue, prints `unjudged: 0` and reports no
+# violations while never having looked at half the codebase. The same trap is set
+# by javascript vs jsx. Rather than ask an agent to remember this, the census
+# compares the extensions its rules cover against the extensions actually present
+# in the scope and reports anything uncovered.
+LANGUAGE_EXTENSIONS = {
+    "typescript": {".ts", ".cts", ".mts"},
+    "tsx": {".tsx"},
+    "javascript": {".js", ".cjs", ".mjs", ".jsx"},
+    "html": {".html", ".htm"},
+    "css": {".css"},
+    "scss": {".scss"},
+    "python": {".py", ".pyi"},
+    "rust": {".rs"},
+    "go": {".go"},
+    "java": {".java"},
+    "kotlin": {".kt", ".kts"},
+    "c": {".c", ".h"},
+    "cpp": {".cc", ".cpp", ".cxx", ".hpp", ".hh"},
+    "csharp": {".cs"},
+    "ruby": {".rb"},
+    "php": {".php"},
+    "swift": {".swift"},
+    "scala": {".scala"},
+    "lua": {".lua"},
+    "bash": {".sh", ".bash"},
+    "elixir": {".ex", ".exs"},
+    "haskell": {".hs"},
+    "json": {".json"},
+    "yaml": {".yml", ".yaml"},
+}
+
+# Directories excluded when the scope is not inside a git work tree. Inside one,
+# `git ls-files` is used instead so the sweep sees exactly the tracked files.
+UNWALKED_DIRS = {
+    ".git", "node_modules", "target", "dist", "build", "vendor",
+    ".venv", "venv", "__pycache__", ".next", ".cache", "coverage",
+}
+
+# Extensions that carry source worth auditing. Used only to decide which
+# uncovered extensions are worth reporting, so that a scope full of .md and
+# .lock files does not produce noise.
+SOURCE_EXTENSIONS = {ext for exts in LANGUAGE_EXTENSIONS.values() for ext in exts}
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def die(msg: str, code: int = 1):
+    print(f"codesweep: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+# ---------------------------------------------------------------- storage
+
+
+def ledger_path(root: str) -> str:
+    return os.path.join(root, ".codesweep", "ledger.db")
+
+
+def connect(root: str, create: bool = False) -> sqlite3.Connection:
+    path = ledger_path(root)
+    if not create and not os.path.exists(path):
+        die(f"no ledger at {path}. Run `codesweep census` first.")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        PRAGMA journal_mode=WAL;
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY, value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sweep (
+            name        TEXT PRIMARY KEY,
+            question    TEXT NOT NULL,
+            scope       TEXT NOT NULL,
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS rule (
+            sweep       TEXT NOT NULL,
+            rule_id     TEXT NOT NULL,
+            language    TEXT NOT NULL,
+            path        TEXT NOT NULL,
+            source      TEXT NOT NULL,
+            source_hash TEXT NOT NULL,
+            PRIMARY KEY (sweep, rule_id)
+        );
+        CREATE TABLE IF NOT EXISTS census_run (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            sweep     TEXT NOT NULL,
+            ran_at    TEXT NOT NULL,
+            found     INTEGER NOT NULL,
+            added     INTEGER NOT NULL,
+            departed  INTEGER NOT NULL,
+            uncovered TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE IF NOT EXISTS site (
+            sweep      TEXT NOT NULL,
+            site_id    TEXT NOT NULL,
+            rule_id    TEXT NOT NULL,
+            file       TEXT NOT NULL,
+            start_line INTEGER NOT NULL,
+            end_line   INTEGER NOT NULL,
+            ordinal    INTEGER NOT NULL,
+            excerpt    TEXT NOT NULL,
+            state      TEXT NOT NULL,
+            first_seen TEXT NOT NULL,
+            last_seen  TEXT NOT NULL,
+            PRIMARY KEY (sweep, site_id)
+        );
+        CREATE INDEX IF NOT EXISTS site_by_state ON site (sweep, state);
+        CREATE TABLE IF NOT EXISTS verdict (
+            sweep     TEXT NOT NULL,
+            site_id   TEXT NOT NULL,
+            verdict   TEXT NOT NULL,
+            note      TEXT NOT NULL,
+            judged_at TEXT NOT NULL,
+            PRIMARY KEY (sweep, site_id)
+        );
+        """
+    )
+    # CREATE TABLE IF NOT EXISTS leaves an older ledger without newer columns,
+    # so add them explicitly. A duplicate-column error means the column is
+    # already present, which is the only acceptable reason for this to fail.
+    for table, column, decl in (("census_run", "uncovered", "TEXT NOT NULL DEFAULT '{}'"),):
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    conn.execute(
+        "INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)",
+        (str(SCHEMA_VERSION),),
+    )
+    conn.commit()
+    return conn
+
+
+def require_sweep(conn, name: str) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM sweep WHERE name = ?", (name,)).fetchone()
+    if row is None:
+        known = [r["name"] for r in conn.execute("SELECT name FROM sweep ORDER BY name")]
+        die(f"no sweep named {name!r}. Known sweeps: {', '.join(known) or '(none)'}")
+    return row
+
+
+# ---------------------------------------------------------------- ast-grep
+
+
+def ast_grep_binary() -> str:
+    for candidate in ("ast-grep", "sg"):
+        found = shutil.which(candidate)
+        if found:
+            return found
+    die(
+        "ast-grep is not on PATH. codesweep will not guess at a candidate set "
+        "without it. Install with `brew install ast-grep`."
+    )
+
+
+def run_rule(binary: str, rule_path: str, scope: str) -> list:
+    """Run one ast-grep rule over the scope and return its raw matches."""
+    proc = subprocess.run(
+        [binary, "scan", "--rule", rule_path, "--json=compact", scope],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode not in (0, 1):
+        die(
+            f"ast-grep failed on rule {rule_path} (exit {proc.returncode}):\n"
+            f"{proc.stderr.strip()}"
+        )
+    body = proc.stdout.strip()
+    if not body:
+        return []
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        die(f"ast-grep produced unparseable JSON for rule {rule_path}: {exc}")
+
+
+def scope_extensions(scope: str) -> tuple:
+    """Source extensions present in the scope, and how they were discovered.
+
+    Inside a git work tree the tracked file list is authoritative and matches
+    what ast-grep sees. Outside one the filesystem is walked with vendor
+    directories excluded. The method is reported rather than chosen silently,
+    because the two can legitimately disagree.
+    """
+    proc = subprocess.run(
+        ["git", "-C", scope, "ls-files", "--cached", "--others", "--exclude-standard"],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode == 0:
+        names = proc.stdout.splitlines()
+        method = "git"
+    else:
+        names = []
+        for dirpath, dirnames, filenames in os.walk(scope):
+            dirnames[:] = [d for d in dirnames if d not in UNWALKED_DIRS]
+            names.extend(filenames)
+        method = "walk"
+    found = {}
+    for name in names:
+        ext = os.path.splitext(name)[1]
+        if ext in SOURCE_EXTENSIONS:
+            found[ext] = found.get(ext, 0) + 1
+    return found, method
+
+
+def uncovered_extensions(present: dict, languages: list) -> dict:
+    """Source extensions in the scope that no census rule's language covers."""
+    covered = set()
+    unknown = []
+    for language in languages:
+        exts = LANGUAGE_EXTENSIONS.get(language)
+        if exts is None:
+            unknown.append(language)
+        else:
+            covered |= exts
+    return {
+        "uncovered": {e: n for e, n in sorted(present.items()) if e not in covered},
+        "languages_not_in_extension_map": sorted(set(unknown)),
+    }
+
+
+def read_rule_meta(path: str) -> tuple:
+    """Pull id and language out of a rule file without a YAML dependency.
+
+    ast-grep rule files put `id:` and `language:` at the top level, so a
+    line-anchored read is sufficient and avoids adding a dependency purely to
+    read two scalars.
+    """
+    rule_id = None
+    language = None
+    with open(path) as handle:
+        source = handle.read()
+    for line in source.splitlines():
+        if line.startswith("id:") and rule_id is None:
+            rule_id = line.split(":", 1)[1].strip().strip("'\"")
+        elif line.startswith("language:") and language is None:
+            language = line.split(":", 1)[1].strip().strip("'\"")
+    if not rule_id:
+        die(f"rule file {path} has no top-level `id:` field")
+    if not language:
+        die(f"rule file {path} has no top-level `language:` field")
+    return rule_id, language, source
+
+
+# ---------------------------------------------------------------- census
+
+
+def normalise(text: str) -> str:
+    """Collapse whitespace so reformatting alone does not invalidate a verdict."""
+    return " ".join(text.split())
+
+
+def site_identity(rule_id: str, relfile: str, ordinal: int, text: str) -> str:
+    payload = "\0".join([rule_id, relfile, str(ordinal), normalise(text)])
+    return hashlib.sha256(payload.encode()).hexdigest()[:SITE_ID_HEX_CHARS]
+
+
+def cmd_census(args):
+    root = os.path.abspath(args.root)
+    binary = ast_grep_binary()
+    # A relative scope resolves against --root, never against the current
+    # directory. Resolving against the working directory would let the same
+    # command sweep a different tree depending on where it was run, and still
+    # print its coverage arithmetic with full confidence.
+    if args.scope:
+        scope = args.scope if os.path.isabs(args.scope) else os.path.join(root, args.scope)
+    else:
+        scope = root
+    scope = os.path.abspath(scope)
+    if not os.path.exists(scope):
+        die(f"scope {scope} does not exist (relative scopes resolve against --root, {root})")
+
+    for rule in args.rule:
+        if not os.path.exists(rule):
+            die(f"rule file {rule} does not exist")
+
+    conn = connect(root, create=True)
+    existing = conn.execute("SELECT * FROM sweep WHERE name = ?", (args.name,)).fetchone()
+    if existing is None:
+        if not args.question:
+            die("a new sweep needs --question: the audit question in plain words")
+        conn.execute(
+            "INSERT INTO sweep (name, question, scope, created_at, updated_at) "
+            "VALUES (?,?,?,?,?)",
+            (args.name, args.question, os.path.relpath(scope, root), now(), now()),
+        )
+    elif args.question and args.question != existing["question"]:
+        die(
+            f"sweep {args.name!r} already asks: {existing['question']!r}\n"
+            "Changing the question changes what the verdicts mean. Start a new sweep."
+        )
+
+    # Record the rules. The census is only ever complete with respect to these.
+    conn.execute("DELETE FROM rule WHERE sweep = ?", (args.name,))
+    rule_files = []
+    rule_langs = []
+    for path in args.rule:
+        rule_id, language, source = read_rule_meta(path)
+        rule_langs.append((path, rule_id, language))
+        conn.execute(
+            "INSERT INTO rule (sweep, rule_id, language, path, source, source_hash) "
+            "VALUES (?,?,?,?,?,?)",
+            (
+                args.name,
+                rule_id,
+                language,
+                os.path.relpath(os.path.abspath(path), root),
+                source,
+                hashlib.sha256(source.encode()).hexdigest()[:SITE_ID_HEX_CHARS],
+            ),
+        )
+        rule_files.append((path, rule_id))
+
+    # Enumerate.
+    seen = {}
+    ordinals = {}
+    for path, rule_id in rule_files:
+        for match in run_rule(binary, path, scope):
+            relfile = os.path.relpath(match["file"], root)
+            text = match.get("text", "")
+            key = (rule_id, relfile, normalise(text))
+            ordinal = ordinals.get(key, 0)
+            ordinals[key] = ordinal + 1
+            site_id = site_identity(rule_id, relfile, ordinal, text)
+            rng = match["range"]
+            seen[site_id] = {
+                "rule_id": rule_id,
+                "file": relfile,
+                # ast-grep reports zero-based lines; the ledger stores one-based
+                # so that every number it prints matches what an editor shows.
+                "start_line": rng["start"]["line"] + 1,
+                "end_line": rng["end"]["line"] + 1,
+                "ordinal": ordinal,
+                "excerpt": text[:MAX_EXCERPT_CHARS],
+            }
+
+    stamp = now()
+    prior_live = {
+        r["site_id"]
+        for r in conn.execute(
+            "SELECT site_id FROM site WHERE sweep = ? AND state = ?",
+            (args.name, STATE_LIVE),
+        )
+    }
+    added = 0
+    for site_id, s in seen.items():
+        row = conn.execute(
+            "SELECT site_id FROM site WHERE sweep = ? AND site_id = ?",
+            (args.name, site_id),
+        ).fetchone()
+        if row is None:
+            added += 1
+            conn.execute(
+                "INSERT INTO site (sweep, site_id, rule_id, file, start_line, end_line,"
+                " ordinal, excerpt, state, first_seen, last_seen)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    args.name,
+                    site_id,
+                    s["rule_id"],
+                    s["file"],
+                    s["start_line"],
+                    s["end_line"],
+                    s["ordinal"],
+                    s["excerpt"],
+                    STATE_LIVE,
+                    stamp,
+                    stamp,
+                ),
+            )
+        else:
+            conn.execute(
+                "UPDATE site SET start_line = ?, end_line = ?, excerpt = ?,"
+                " state = ?, last_seen = ? WHERE sweep = ? AND site_id = ?",
+                (
+                    s["start_line"],
+                    s["end_line"],
+                    s["excerpt"],
+                    STATE_LIVE,
+                    stamp,
+                    args.name,
+                    site_id,
+                ),
+            )
+
+    departed = sorted(prior_live - set(seen))
+    for site_id in departed:
+        conn.execute(
+            "UPDATE site SET state = ? WHERE sweep = ? AND site_id = ?",
+            (STATE_GONE, args.name, site_id),
+        )
+
+    present, discovery = scope_extensions(scope)
+    gaps = uncovered_extensions(present, [lang for _, _, lang in rule_langs])
+    conn.execute(
+        "INSERT INTO census_run (sweep, ran_at, found, added, departed, uncovered)"
+        " VALUES (?,?,?,?,?,?)",
+        (
+            args.name,
+            stamp,
+            len(seen),
+            added,
+            len(departed),
+            json.dumps(gaps["uncovered"]),
+        ),
+    )
+    conn.execute("UPDATE sweep SET updated_at = ? WHERE name = ?", (stamp, args.name))
+    conn.commit()
+
+    counts = coverage(conn, args.name)
+
+    payload = {
+        "sweep": args.name,
+        "scope": os.path.relpath(scope, root),
+        "rules": [rid for _, rid in rule_files],
+        "rule_languages": sorted({lang for _, _, lang in rule_langs}),
+        "sites_found": len(seen),
+        "sites_new": added,
+        "sites_departed": len(departed),
+        "unjudged": counts["unjudged"],
+        "file_discovery": discovery,
+        "note": (
+            "The census is complete with respect to these rules only. A site "
+            "whose code changed since it was judged returns as new and needs "
+            "judging again."
+        ),
+    }
+    if gaps["uncovered"]:
+        payload["WARNING_uncovered_extensions"] = gaps["uncovered"]
+        payload["WARNING"] = (
+            "The scope contains source files with extensions that NO census rule "
+            "covers, so those files were never examined and cannot appear in the "
+            "report. ast-grep treats tsx as a language separate from typescript, "
+            "and jsx separately from javascript, so a .tsx file needs its own rule "
+            "with `language: tsx`. Add a rule per language or narrow the scope. "
+            "Coverage arithmetic below counts only the files the rules can reach."
+        )
+    if gaps["languages_not_in_extension_map"]:
+        payload["WARNING_unknown_rule_languages"] = gaps["languages_not_in_extension_map"]
+        payload.setdefault(
+            "WARNING",
+            "One or more rule languages are absent from codesweep's extension map, "
+            "so the uncovered-extension check could not run for them. Verify by hand "
+            "that every file you expect to be swept was reached.",
+        )
+    print(json.dumps(payload, indent=2))
+
+
+# ---------------------------------------------------------------- coverage
+
+
+def coverage(conn, name: str) -> dict:
+    live = conn.execute(
+        "SELECT COUNT(*) c FROM site WHERE sweep = ? AND state = ?", (name, STATE_LIVE)
+    ).fetchone()["c"]
+    judged = conn.execute(
+        "SELECT COUNT(*) c FROM site s JOIN verdict v"
+        " ON v.sweep = s.sweep AND v.site_id = s.site_id"
+        " WHERE s.sweep = ? AND s.state = ?",
+        (name, STATE_LIVE),
+    ).fetchone()["c"]
+    by_verdict = {
+        r["verdict"]: r["c"]
+        for r in conn.execute(
+            "SELECT v.verdict, COUNT(*) c FROM verdict v JOIN site s"
+            " ON v.sweep = s.sweep AND v.site_id = s.site_id"
+            " WHERE s.sweep = ? AND s.state = ? GROUP BY v.verdict",
+            (name, STATE_LIVE),
+        )
+    }
+    return {
+        "live_sites": live,
+        "judged": judged,
+        "unjudged": live - judged,
+        "by_verdict": by_verdict,
+    }
+
+
+def cmd_status(args):
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    sweep = require_sweep(conn, args.name)
+    counts = coverage(conn, args.name)
+    rules = [
+        dict(r)
+        for r in conn.execute(
+            "SELECT rule_id, language, path, source_hash FROM rule WHERE sweep = ?"
+            " ORDER BY rule_id",
+            (args.name,),
+        )
+    ]
+    last = conn.execute(
+        "SELECT ran_at, found, added, departed, uncovered FROM census_run"
+        " WHERE sweep = ? ORDER BY id DESC LIMIT 1",
+        (args.name,),
+    ).fetchone()
+    uncovered = json.loads(last["uncovered"]) if last else {}
+    print(
+        json.dumps(
+            {
+                "sweep": args.name,
+                "question": sweep["question"],
+                "scope": sweep["scope"],
+                "rules": rules,
+                "last_census": dict(last) if last else None,
+                "uncovered_extensions": uncovered,
+                "coverage": counts,
+                "complete": (
+                    counts["unjudged"] == 0
+                    and counts["live_sites"] > 0
+                    and not uncovered
+                ),
+            },
+            indent=2,
+        )
+    )
+
+
+# ---------------------------------------------------------------- next / verdict
+
+
+def read_context(root: str, relfile: str, start: int, end: int, context: int) -> str:
+    path = os.path.join(root, relfile)
+    try:
+        with open(path, errors="replace") as handle:
+            lines = handle.readlines()
+    except OSError as exc:
+        return f"<could not read {relfile}: {exc}>"
+    lo = max(0, start - 1 - context)
+    hi = min(len(lines), end + context)
+    out = []
+    for i in range(lo, hi):
+        marker = ">" if start <= i + 1 <= end else " "
+        out.append(f"{marker}{i + 1:6d} | {lines[i].rstrip()}")
+    return "\n".join(out)
+
+
+def cmd_next(args):
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    sweep = require_sweep(conn, args.name)
+    rows = conn.execute(
+        "SELECT s.* FROM site s LEFT JOIN verdict v"
+        " ON v.sweep = s.sweep AND v.site_id = s.site_id"
+        " WHERE s.sweep = ? AND s.state = ? AND v.site_id IS NULL"
+        " ORDER BY s.file, s.start_line LIMIT ?",
+        (args.name, STATE_LIVE, args.limit),
+    ).fetchall()
+    counts = coverage(conn, args.name)
+    payload = {
+        "sweep": args.name,
+        "question": sweep["question"],
+        "remaining_after_this_batch": max(0, counts["unjudged"] - len(rows)),
+        "sites": [
+            {
+                "site_id": r["site_id"],
+                "rule_id": r["rule_id"],
+                "file": r["file"],
+                "lines": f"{r['start_line']}-{r['end_line']}",
+                "context": read_context(
+                    root, r["file"], r["start_line"], r["end_line"], args.context
+                ),
+            }
+            for r in rows
+        ],
+    }
+    print(json.dumps(payload, indent=2))
+
+
+def apply_verdict(conn, name: str, site_id: str, verdict: str, note: str):
+    if verdict not in VERDICTS:
+        die(f"verdict must be one of {', '.join(VERDICTS)}, got {verdict!r}")
+    if not note.strip():
+        die(f"site {site_id}: a verdict without a note is not a judgement")
+    row = conn.execute(
+        "SELECT state FROM site WHERE sweep = ? AND site_id = ?", (name, site_id)
+    ).fetchone()
+    if row is None:
+        die(f"site {site_id} is not in sweep {name!r}. Site ids come from `next`.")
+    conn.execute(
+        "INSERT INTO verdict (sweep, site_id, verdict, note, judged_at)"
+        " VALUES (?,?,?,?,?)"
+        " ON CONFLICT(sweep, site_id) DO UPDATE SET"
+        " verdict = excluded.verdict, note = excluded.note, judged_at = excluded.judged_at",
+        (name, site_id, verdict, note.strip(), now()),
+    )
+
+
+def cmd_verdict(args):
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    require_sweep(conn, args.name)
+    if args.from_json:
+        source = sys.stdin.read() if args.from_json == "-" else open(args.from_json).read()
+        try:
+            batch = json.loads(source)
+        except json.JSONDecodeError as exc:
+            die(f"verdict batch is not valid JSON: {exc}")
+        if not isinstance(batch, list):
+            die("verdict batch must be a JSON array of {site_id, verdict, note}")
+        for item in batch:
+            apply_verdict(
+                conn, args.name, item["site_id"], item["verdict"], item.get("note", "")
+            )
+        applied = len(batch)
+    else:
+        if not args.site or not args.verdict:
+            die("give --site and --verdict, or --from-json for a batch")
+        apply_verdict(conn, args.name, args.site, args.verdict, args.note or "")
+        applied = 1
+    conn.commit()
+    counts = coverage(conn, args.name)
+    print(json.dumps({"applied": applied, "coverage": counts}, indent=2))
+
+
+# ---------------------------------------------------------------- report
+
+
+def cmd_report(args):
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    sweep = require_sweep(conn, args.name)
+    counts = coverage(conn, args.name)
+    rules = conn.execute(
+        "SELECT rule_id, language, path, source FROM rule WHERE sweep = ? ORDER BY rule_id",
+        (args.name,),
+    ).fetchall()
+    last = conn.execute(
+        "SELECT uncovered FROM census_run WHERE sweep = ? ORDER BY id DESC LIMIT 1",
+        (args.name,),
+    ).fetchone()
+    uncovered = json.loads(last["uncovered"]) if last else {}
+    violations = conn.execute(
+        "SELECT s.file, s.start_line, s.end_line, s.rule_id, s.site_id, v.note"
+        " FROM site s JOIN verdict v ON v.sweep = s.sweep AND v.site_id = s.site_id"
+        " WHERE s.sweep = ? AND s.state = ? AND v.verdict = 'violation'"
+        " ORDER BY s.file, s.start_line",
+        (args.name, STATE_LIVE),
+    ).fetchall()
+
+    out = []
+    out.append(f"# Sweep: {args.name}")
+    out.append("")
+    out.append(f"**Question.** {sweep['question']}")
+    out.append("")
+    out.append(f"**Scope.** `{sweep['scope']}`")
+    out.append("")
+    out.append("## Coverage")
+    out.append("")
+    out.append("| | |")
+    out.append("|---|---|")
+    out.append(f"| Candidate sites enumerated | {counts['live_sites']} |")
+    out.append(f"| Sites judged | {counts['judged']} |")
+    out.append(f"| Sites unjudged | {counts['unjudged']} |")
+    for verdict in VERDICTS:
+        out.append(f"| Verdict `{verdict}` | {counts['by_verdict'].get(verdict, 0)} |")
+    out.append("")
+    if uncovered:
+        listed = ", ".join(f"{n} `{e}` files" for e, n in uncovered.items())
+        out.append(
+            f"> **This sweep did not look at part of its own scope.** It contains "
+            f"{listed} that no census rule's language can reach, so nothing in "
+            "those files was ever a candidate and no violation in them can appear "
+            "below. Add a rule per language and re-census before treating these "
+            "findings as a picture of the scope."
+        )
+        out.append("")
+    if counts["unjudged"]:
+        out.append(
+            f"> This sweep is INCOMPLETE. {counts['unjudged']} enumerated sites "
+            "have no verdict. Findings below are partial."
+        )
+    elif uncovered:
+        out.append(
+            "> Every site the rules reached carries a verdict. That is a complete "
+            "sweep of the files those rules can parse, not of the scope."
+        )
+    else:
+        out.append(
+            "> Every enumerated site carries a verdict, so this sweep is complete "
+            "with respect to the census rules below and nothing else."
+        )
+    out.append("")
+    out.append("## Census rules")
+    out.append("")
+    out.append(
+        "Completeness is relative to these rules. A violation shaped differently "
+        "from every rule here was never a candidate and does not appear. The rule "
+        "source is reproduced in full so this claim stays checkable after the rule "
+        "files themselves have moved or gone."
+    )
+    out.append("")
+    for r in rules:
+        out.append(f"### `{r['rule_id']}` ({r['language']})")
+        out.append("")
+        out.append(f"From `{r['path']}` at census time.")
+        out.append("")
+        out.append("```yaml")
+        out.append(r["source"].rstrip())
+        out.append("```")
+        out.append("")
+    out.append(
+        "Matching is syntactic. ast-grep does no scope, type or dataflow analysis, "
+        "so it cannot tell one `foo` from another `foo` in a different scope, and a "
+        "call written in a different shape is a different pattern. A sweep is "
+        "complete with respect to a syntactic shape, never with respect to a symbol."
+    )
+    out.append("")
+    out.append(f"## Violations ({len(violations)})")
+    out.append("")
+    if not violations:
+        out.append("None recorded.")
+    for v in violations:
+        out.append(f"### `{v['file']}:{v['start_line']}`")
+        out.append("")
+        out.append(f"Rule `{v['rule_id']}`, site `{v['site_id']}`, "
+                   f"lines {v['start_line']}-{v['end_line']}.")
+        out.append("")
+        out.append(textwrap.fill(v["note"], 88))
+        out.append("")
+
+    text = "\n".join(out)
+    if args.output:
+        with open(args.output, "w") as handle:
+            handle.write(text + "\n")
+        print(f"wrote {args.output}")
+    else:
+        print(text)
+
+
+def cmd_show(args):
+    """Re-read one site after it has left the `next` queue.
+
+    Revisiting a verdict without this means judging blind from memory, which is
+    the habit the ledger exists to replace.
+    """
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    require_sweep(conn, args.name)
+    row = conn.execute(
+        "SELECT * FROM site WHERE sweep = ? AND site_id = ?", (args.name, args.site)
+    ).fetchone()
+    if row is None:
+        die(f"site {args.site} is not in sweep {args.name!r}")
+    verdict = conn.execute(
+        "SELECT verdict, note, judged_at FROM verdict WHERE sweep = ? AND site_id = ?",
+        (args.name, args.site),
+    ).fetchone()
+    print(
+        json.dumps(
+            {
+                "site_id": row["site_id"],
+                "rule_id": row["rule_id"],
+                "file": row["file"],
+                "lines": f"{row['start_line']}-{row['end_line']}",
+                "state": row["state"],
+                "verdict": dict(verdict) if verdict else None,
+                "context": read_context(
+                    root, row["file"], row["start_line"], row["end_line"], args.context
+                ),
+            },
+            indent=2,
+        )
+    )
+
+
+def cmd_list(args):
+    root = os.path.abspath(args.root)
+    conn = connect(root)
+    rows = conn.execute("SELECT * FROM sweep ORDER BY updated_at DESC").fetchall()
+    print(
+        json.dumps(
+            [
+                {
+                    "sweep": r["name"],
+                    "question": r["question"],
+                    "scope": r["scope"],
+                    "updated_at": r["updated_at"],
+                    "coverage": coverage(conn, r["name"]),
+                }
+                for r in rows
+            ],
+            indent=2,
+        )
+    )
+
+
+# ---------------------------------------------------------------- cli
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        prog="codesweep",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    # --root is accepted both before and after the subcommand. argparse only
+    # offers the former by default, which makes the natural
+    # `codesweep list --root <path>` fail with an unrecognised-argument error.
+    root_opt = argparse.ArgumentParser(add_help=False)
+    root_opt.add_argument(
+        "--root",
+        default=None,
+        help="repository root; the ledger lives at <root>/.codesweep/ledger.db",
+    )
+    parser.add_argument(
+        "--root",
+        dest="root_global",
+        default=None,
+        help="repository root; may also be given after the subcommand",
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("census", parents=[root_opt], help="enumerate every candidate site via ast-grep")
+    p.add_argument("name")
+    p.add_argument("--rule", action="append", required=True, help="ast-grep rule file (repeatable)")
+    p.add_argument("--scope", help="subdirectory to sweep; defaults to root")
+    p.add_argument("--question", help="the audit question, in plain words")
+    p.set_defaults(func=cmd_census)
+
+    p = sub.add_parser("next", parents=[root_opt], help="hand out the next batch of unjudged sites")
+    p.add_argument("name")
+    p.add_argument("--limit", type=int, default=DEFAULT_BATCH_SIZE)
+    p.add_argument("--context", type=int, default=DEFAULT_CONTEXT_LINES)
+    p.set_defaults(func=cmd_next)
+
+    p = sub.add_parser("verdict", parents=[root_opt], help="record a judgement against a site")
+    p.add_argument("name")
+    p.add_argument("--site")
+    p.add_argument("--verdict", choices=VERDICTS)
+    p.add_argument("--note", default="")
+    p.add_argument("--from-json", help="file of [{site_id,verdict,note}], or - for stdin")
+    p.set_defaults(func=cmd_verdict)
+
+    p = sub.add_parser("status", parents=[root_opt], help="coverage arithmetic for one sweep")
+    p.add_argument("name")
+    p.set_defaults(func=cmd_status)
+
+    p = sub.add_parser("report", parents=[root_opt], help="markdown findings with an explicit coverage claim")
+    p.add_argument("name")
+    p.add_argument("-o", "--output")
+    p.set_defaults(func=cmd_report)
+
+    p = sub.add_parser("show", parents=[root_opt], help="re-read one site, judged or not, with more context")
+    p.add_argument("name")
+    p.add_argument("--site", required=True)
+    p.add_argument("--context", type=int, default=DEFAULT_CONTEXT_LINES * 3)
+    p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("list", parents=[root_opt], help="every sweep in this repository")
+    p.set_defaults(func=cmd_list)
+
+    args = parser.parse_args()
+    # Whichever position --root was given in wins; neither means the working
+    # directory, which is only ever right when it is already the repo root.
+    args.root = args.root or args.root_global or "."
+    args.func(args)
+
+
+if __name__ == "__main__":
+    main()

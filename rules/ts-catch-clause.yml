@@ -1,0 +1,9 @@
+# Every catch clause is a candidate for a silent fallback: the question of
+# whether it swallows an error or re-raises it is semantic, so enumeration
+# hands the whole set to a judge rather than guessing which ones matter.
+id: ts-catch-clause
+language: typescript
+rule:
+  kind: catch_clause
+# ast-grep treats tsx as a separate language, so this rule never sees a .tsx
+# file. Pair it with tsx-catch-clause.yml on any scope containing React code.

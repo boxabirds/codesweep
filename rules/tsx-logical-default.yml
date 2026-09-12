@@ -1,0 +1,8 @@
+# `a || b` and `a ?? b` are where defaults get introduced without anyone
+# deciding they were wanted.
+id: tsx-logical-default
+language: tsx
+rule:
+  any:
+    - pattern: $A || $B
+    - pattern: $A ?? $B

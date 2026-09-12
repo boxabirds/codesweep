@@ -1,0 +1,221 @@
+#!/usr/bin/env bash
+# End-to-end tests for codesweep against a fixture repository with a known,
+# hand-counted number of candidate sites. Every assertion compares against a
+# number derived by reading the fixture, not against whatever the tool produced.
+set -uo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+CODESWEEP="$HERE/../bin/codesweep"
+PASS=0
+FAIL=0
+
+check() {
+  local label="$1" expected="$2" actual="$3"
+  if [ "$expected" = "$actual" ]; then
+    printf '  ok   %s (%s)\n' "$label" "$actual"
+    PASS=$((PASS + 1))
+  else
+    printf '  FAIL %s: expected %s, got %s\n' "$label" "$expected" "$actual"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+jqp() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+mkdir -p "$WORK/src"
+
+# Fixture: 3 catch clauses. Two swallow, one rethrows.
+cat > "$WORK/src/a.ts" <<'EOF'
+export async function load(db: D1Database) {
+  try {
+    return await db.prepare('select 1').all();
+  } catch (e) {
+    return [];
+  }
+}
+
+export async function save(db: D1Database) {
+  try {
+    return await db.prepare('insert').run();
+  } catch (e) {
+    throw e;
+  }
+}
+EOF
+
+cat > "$WORK/src/b.ts" <<'EOF'
+export function parse(raw: string) {
+  try {
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+EOF
+
+cat > "$WORK/catch.yml" <<'EOF'
+id: ts-catch
+language: typescript
+rule:
+  kind: catch_clause
+EOF
+
+cat > "$WORK/swallow.yml" <<'EOF'
+id: ts-swallow
+language: typescript
+rule:
+  kind: catch_clause
+  not:
+    has:
+      stopBy: end
+      pattern: throw $E
+EOF
+
+echo "census enumerates every catch clause"
+OUT=$("$CODESWEEP" --root "$WORK" census all --rule "$WORK/catch.yml" --scope "$WORK/src" \
+  --question "Does this catch clause hide a failure from the caller?")
+check "sites found" 3 "$(echo "$OUT" | jqp 'd["sites_found"]')"
+check "all new"     3 "$(echo "$OUT" | jqp 'd["sites_new"]')"
+check "all unjudged" 3 "$(echo "$OUT" | jqp 'd["unjudged"]')"
+
+echo "a narrowed rule excludes the rethrow"
+OUT=$("$CODESWEEP" --root "$WORK" census narrow --rule "$WORK/swallow.yml" --scope "$WORK/src" \
+  --question "Does this catch clause hide a failure from the caller?")
+check "narrowed sites" 2 "$(echo "$OUT" | jqp 'd["sites_found"]')"
+
+echo "next hands out unjudged sites and nothing else"
+OUT=$("$CODESWEEP" --root "$WORK" next all --limit 2)
+check "batch size" 2 "$(echo "$OUT" | jqp 'len(d["sites"])')"
+check "remaining after batch" 1 "$(echo "$OUT" | jqp 'd["remaining_after_this_batch"]')"
+check "context has a marker" "True" "$(echo "$OUT" | jqp '">" in d["sites"][0]["context"]')"
+
+echo "an empty note is refused"
+FIRST=$("$CODESWEEP" --root "$WORK" next all --limit 1 | jqp 'd["sites"][0]["site_id"]')
+"$CODESWEEP" --root "$WORK" verdict all --site "$FIRST" --verdict pass --note "" >/dev/null 2>&1
+check "exit code for empty note" 1 "$?"
+
+echo "an unknown site id is refused"
+"$CODESWEEP" --root "$WORK" verdict all --site deadbeefdeadbeef --verdict pass --note "x" >/dev/null 2>&1
+check "exit code for unknown site" 1 "$?"
+
+echo "status reports incomplete until the queue is drained"
+check "not complete yet" "False" "$("$CODESWEEP" --root "$WORK" status all | jqp 'd["complete"]')"
+
+echo "draining the queue makes coverage arithmetic close"
+while true; do
+  BATCH=$("$CODESWEEP" --root "$WORK" next all --limit 2)
+  COUNT=$(echo "$BATCH" | jqp 'len(d["sites"])')
+  [ "$COUNT" = "0" ] && break
+  # Judge only the matched lines, which `next` marks with a leading '>'. Reading
+  # the whole context block would let a neighbouring site's `throw` bleed in,
+  # which is the excerpt-bleed mistake the skill warns a judging agent about.
+  echo "$BATCH" | python3 -c "
+import json,sys
+d=json.load(sys.stdin)
+def matched(ctx):
+    return '\n'.join(l for l in ctx.splitlines() if l.startswith('>'))
+print(json.dumps([
+  {'site_id': s['site_id'],
+   'verdict': 'pass' if 'throw' in matched(s['context']) else 'violation',
+   'note': 'judged in test from the matched lines only'}
+  for s in d['sites']]))" | "$CODESWEEP" --root "$WORK" verdict all --from-json - >/dev/null
+done
+ST=$("$CODESWEEP" --root "$WORK" status all)
+check "unjudged"   0 "$(echo "$ST" | jqp 'd["coverage"]["unjudged"]')"
+check "judged"     3 "$(echo "$ST" | jqp 'd["coverage"]["judged"]')"
+check "complete"   "True" "$(echo "$ST" | jqp 'd["complete"]')"
+check "violations" 2 "$(echo "$ST" | jqp 'd["coverage"]["by_verdict"]["violation"]')"
+
+echo "reformatting alone does not invalidate a verdict"
+python3 - "$WORK/src/b.ts" <<'EOF'
+import sys
+p = sys.argv[1]
+src = open(p).read().replace("  } catch (e) {", "  }\n  catch (e) {")
+open(p, "w").write(src)
+EOF
+OUT=$("$CODESWEEP" --root "$WORK" census all --rule "$WORK/catch.yml" --scope "$WORK/src")
+check "reformat adds no sites" 0 "$(echo "$OUT" | jqp 'd["sites_new"]')"
+check "reformat still complete" 0 "$(echo "$OUT" | jqp 'd["unjudged"]')"
+
+echo "changing a site's code returns it to the queue"
+python3 - "$WORK/src/b.ts" <<'EOF'
+import sys
+p = sys.argv[1]
+src = open(p).read().replace("return null;", "return undefined;")
+open(p, "w").write(src)
+EOF
+OUT=$("$CODESWEEP" --root "$WORK" census all --rule "$WORK/catch.yml" --scope "$WORK/src")
+check "changed site is new"      1 "$(echo "$OUT" | jqp 'd["sites_new"]')"
+check "old site departed"        1 "$(echo "$OUT" | jqp 'd["sites_departed"]')"
+check "one site needs rejudging" 1 "$(echo "$OUT" | jqp 'd["unjudged"]')"
+check "untouched verdicts kept"  2 "$("$CODESWEEP" --root "$WORK" status all | jqp 'd["coverage"]["judged"]')"
+
+echo "deleting a file removes its sites from the arithmetic"
+rm "$WORK/src/b.ts"
+OUT=$("$CODESWEEP" --root "$WORK" census all --rule "$WORK/catch.yml" --scope "$WORK/src")
+check "sites after deletion" 2 "$(echo "$OUT" | jqp 'd["sites_found"]')"
+check "complete again"       0 "$(echo "$OUT" | jqp 'd["unjudged"]')"
+
+echo "changing the question on an existing sweep is refused"
+"$CODESWEEP" --root "$WORK" census all --rule "$WORK/catch.yml" --scope "$WORK/src" \
+  --question "a completely different question" >/dev/null 2>&1
+check "exit code for changed question" 1 "$?"
+
+echo "a scope containing .tsx warns when only a typescript rule is given"
+# This is the defect that shipped: language: typescript silently skips .tsx, so
+# the sweep completes with a confident, clean, wrong report.
+mkdir -p "$WORK/mixed"
+cat > "$WORK/mixed/plain.ts" <<'EOF'
+export function a() { try { f(); } catch (e) { return null; } }
+EOF
+cat > "$WORK/mixed/View.tsx" <<'EOF'
+export function View() {
+  try { return <div />; } catch (e) { return null; }
+}
+EOF
+OUT=$("$CODESWEEP" --root "$WORK" census tsxgap --rule "$WORK/catch.yml" --scope "$WORK/mixed" \
+  --question "Does this catch clause hide a failure from the caller?")
+check "ts-only rule finds one site"  1 "$(echo "$OUT" | jqp 'd["sites_found"]')"
+check "warns about .tsx"       "True" "$(echo "$OUT" | jqp "'.tsx' in d.get('WARNING_uncovered_extensions', {})")"
+check "counts the tsx files"         1 "$(echo "$OUT" | jqp 'd["WARNING_uncovered_extensions"][".tsx"]')"
+
+cat > "$WORK/catch-tsx.yml" <<'EOF'
+id: tsx-catch
+language: tsx
+rule:
+  kind: catch_clause
+EOF
+OUT=$("$CODESWEEP" --root "$WORK" census tsxgap --rule "$WORK/catch.yml" --rule "$WORK/catch-tsx.yml" \
+  --scope "$WORK/mixed")
+check "both rules find both sites" 2 "$(echo "$OUT" | jqp 'd["sites_found"]')"
+check "warning cleared"       "False" "$(echo "$OUT" | jqp "'WARNING_uncovered_extensions' in d")"
+
+echo "a relative scope resolves against --root, not the working directory"
+OUT=$(cd / && "$CODESWEEP" --root "$WORK" census relscope --rule "$WORK/catch.yml" --scope mixed \
+  --question "Does this catch clause hide a failure from the caller?")
+check "relative scope found the repo tree" 1 "$(echo "$OUT" | jqp 'd["sites_found"]')"
+
+echo "--root works after the subcommand as well as before"
+check "before subcommand" "True" "$("$CODESWEEP" --root "$WORK" list | jqp "len(d) > 0")"
+check "after subcommand"  "True" "$("$CODESWEEP" list --root "$WORK" | jqp "len(d) > 0")"
+
+echo "show re-reads a site after it has left the queue"
+SITE=$("$CODESWEEP" --root "$WORK" show all --site "$FIRST" | jqp 'd["site_id"]')
+check "show returns the site"     "$FIRST" "$SITE"
+check "show carries the verdict"  "True" "$("$CODESWEEP" --root "$WORK" show all --site "$FIRST" | jqp 'd["verdict"] is not None')"
+
+echo "the report states its own coverage and names its rules"
+REPORT=$("$CODESWEEP" --root "$WORK" report all)
+check "report names the rule"    "True" "$(printf '%s' "$REPORT" | grep -q 'ts-catch' && echo True || echo False)"
+check "report claims complete"   "True" "$(printf '%s' "$REPORT" | grep -q 'complete with respect to' && echo True || echo False)"
+check "report inlines rule source" "True" "$(printf '%s' "$REPORT" | grep -q 'kind: catch_clause' && echo True || echo False)"
+check "report states the syntactic limit" "True" "$(printf '%s' "$REPORT" | grep -q 'never with respect to a symbol' && echo True || echo False)"
+
+echo "an incomplete sweep says so in its report"
+INCOMPLETE=$("$CODESWEEP" --root "$WORK" report narrow)
+check "incomplete report warns" "True" "$(printf '%s' "$INCOMPLETE" | grep -q 'INCOMPLETE' && echo True || echo False)"
+
+printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
+[ "$FAIL" -eq 0 ]

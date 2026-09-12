@@ -1,0 +1,10 @@
+# The design system forbids hex codes, rgb()/hsl() functions and the named
+# colours white and black in component CSS: every colour must come from a
+# palette custom property so that dark mode can override it. The palette file
+# itself is the one place literals belong, so a census excludes it by scope
+# rather than by rule.
+id: css-literal-colour
+language: css
+rule:
+  kind: declaration
+  regex: ':\s*(#[0-9a-fA-F]{3,8}\b|(rgb|rgba|hsl|hsla)\(|(white|black)\s*;?\s*$)'
