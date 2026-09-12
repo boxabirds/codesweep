@@ -332,13 +332,17 @@ def run_rule(binary: str, rule_path: str, scope: str) -> list:
         die(f"ast-grep produced unparseable JSON for rule {rule_path}: {exc}")
 
 
-def scope_extensions(scope: str) -> tuple:
-    """Source extensions present in the scope, and how they were discovered.
+def discovered_files(scope: str) -> tuple:
+    """Files in the scope, and how they were found.
 
     Inside a git work tree the tracked file list is authoritative and matches
     what ast-grep sees. Outside one the filesystem is walked with vendor
     directories excluded. The method is reported rather than chosen silently,
     because the two can legitimately disagree.
+
+    Shared by the extension check and the surface proposal so that both see the
+    same files. If they disagreed, the proposal could suggest a part of the
+    system the census can never reach.
     """
     proc = subprocess.run(
         ["git", "-C", scope, "ls-files", "--cached", "--others", "--exclude-standard"],
@@ -346,14 +350,19 @@ def scope_extensions(scope: str) -> tuple:
         text=True,
     )
     if proc.returncode == 0:
-        names = proc.stdout.splitlines()
-        method = "git"
-    else:
-        names = []
-        for dirpath, dirnames, filenames in os.walk(scope):
-            dirnames[:] = [d for d in dirnames if d not in UNWALKED_DIRS]
-            names.extend(filenames)
-        method = "walk"
+        return proc.stdout.splitlines(), "git"
+    names = []
+    for dirpath, dirnames, filenames in os.walk(scope):
+        dirnames[:] = [d for d in dirnames if d not in UNWALKED_DIRS]
+        rel = os.path.relpath(dirpath, scope)
+        for f in filenames:
+            names.append(f if rel == "." else os.path.join(rel, f))
+    return names, "walk"
+
+
+def scope_extensions(scope: str) -> tuple:
+    """Source extensions present in the scope, and how they were discovered."""
+    names, method = discovered_files(scope)
     found = {}
     for name in names:
         ext = os.path.splitext(name)[1]
@@ -697,13 +706,120 @@ def surface_counts(conn, sweep: str) -> dict:
     }
 
 
+# What in a repository suggests a part of the system worth examining. Each entry
+# is a filename or directory that, when found, proposes a surface. Deliberately
+# short and biased towards precision: a proposal with twenty entries gets
+# accepted wholesale without being read, which is worse than five that get
+# edited.
+PACKAGE_MANIFESTS = {
+    "package.json", "Cargo.toml", "pyproject.toml", "setup.py", "go.mod",
+    "pom.xml", "build.gradle", "build.gradle.kts", "Gemfile", "composer.json",
+}
+
+CI_MARKERS = (
+    ".github/workflows/", ".gitlab-ci.yml", ".circleci/", "azure-pipelines.yml",
+    "Jenkinsfile", ".buildkite/",
+)
+
+HOOK_MARKERS = (
+    ".husky/", ".githooks/", "lefthook.yml", ".pre-commit-config.yaml",
+)
+
+DOC_DIRS = ("docs/", "doc/", "documentation/")
+
+DEPLOY_MARKERS = (
+    "wrangler.toml", "wrangler.jsonc", "Dockerfile", "docker-compose.yml",
+    "docker-compose.yaml", "fly.toml", "vercel.json", "netlify.toml",
+    "serverless.yml", "k8s/", "terraform/", ".env.example",
+)
+
+
+def propose_surfaces(root: str) -> list:
+    """Candidate surfaces, each with the evidence that suggested it.
+
+    Uses the same file discovery the census uses, so a candidate can never be a
+    part of the system the census would refuse to look at.
+
+    This list is incomplete by construction and says so where it is printed.
+    Two of the surfaces in the audit that motivated this feature, the secrets
+    actually set in each deployed environment and the production data, leave no
+    trace in a repository. No scan will ever propose them, and the surface added
+    latest in that audit held its largest finding.
+    """
+    names, method = discovered_files(root)
+    seen = {}
+
+    def add(name, scope, evidence):
+        if name not in seen:
+            seen[name] = {"name": name, "scope": scope, "evidence": evidence}
+
+    for rel in names:
+        parts = rel.split("/")
+        base = parts[-1]
+
+        if base in PACKAGE_MANIFESTS and len(parts) > 1:
+            pkg = "/".join(parts[:-1])
+            add(f"package: {pkg}", pkg, rel)
+
+        for marker in CI_MARKERS:
+            if rel == marker or rel.startswith(marker):
+                add("automated checks", None, rel)
+        for marker in HOOK_MARKERS:
+            if rel == marker or rel.startswith(marker):
+                add("commit hooks", None, rel)
+        for d in DOC_DIRS:
+            if rel.startswith(d):
+                add("documentation", d.rstrip("/"), rel)
+        for marker in DEPLOY_MARKERS:
+            if rel == marker or rel.startswith(marker):
+                add("deployed configuration", None, rel)
+
+    # Any top-level directory holding source the census could reach earns a
+    # surface, unless a package manifest already claimed it or something inside
+    # it. Derived from what is present rather than from a list of conventional
+    # directory names, because a fixed list is a template by another name and
+    # misses whatever this particular project happens to call things.
+    claimed = {c["scope"] for c in seen.values() if c["scope"]}
+    for rel in names:
+        parts = rel.split("/")
+        if len(parts) < 2:
+            continue
+        if os.path.splitext(parts[-1])[1] not in SOURCE_EXTENSIONS:
+            continue
+        top = parts[0]
+        if top.startswith("."):
+            continue
+        if top in claimed or any(c.startswith(top + "/") for c in claimed):
+            continue
+        add(f"source: {top}", top, rel)
+
+    return sorted(seen.values(), key=lambda c: c["name"]), method
+
+
 def cmd_surfaces(args):
     root = os.path.abspath(args.root)
     conn = connect(root)
     require_sweep(conn, args.name)
 
     if args.propose:
-        die("proposing surfaces is not implemented yet")
+        candidates, method = propose_surfaces(root)
+        declared = {r["name"] for r in surfaces_of(conn, args.name)}
+        print(json.dumps({
+            "sweep": args.name,
+            "file_discovery": method,
+            "proposed": [
+                dict(c, already_declared=c["name"] in declared) for c in candidates
+            ],
+            "note": (
+                "A starting point, not a complete list. This is drawn only from "
+                "what leaves a trace in the repository. Parts of a system that "
+                "leave none, such as the secrets actually set in a deployed "
+                "environment or the contents of production data, will never be "
+                "proposed here and have to be named by hand. Add what is missing "
+                "and remove what does not apply."
+            ),
+        }, indent=2))
+        return
 
     def known() -> dict:
         return {r["name"]: r for r in surfaces_of(conn, args.name)}
