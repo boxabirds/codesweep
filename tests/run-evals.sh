@@ -51,6 +51,58 @@ if [ ! -x "$BUILT" ]; then
   fi
 fi
 
+# The fixture, resolved before anything is launched.
+#
+# Absence is a skip and drift is a hard error, and the difference matters: a
+# missing copy shows up in the result and a drifted one does not. The first time
+# a network is down, a red result reads as a broken tool, and after the second
+# time nobody reads results at all.
+#
+# The shape follows the guard in the cbr axios integration test in the codemine
+# project, where resolution sits inside a try and an unreachable repository
+# skips rather than fails. That is Python and this is shell, so this is the
+# shape rather than the code.
+AXIOS_PIN=8092aee7240220aa7913d163187b7fba8d9e5a51
+AXIOS_CACHE="${RESWEEP_FIXTURE_DIR:-$HOME/.cache/github/axios/axios}"
+# Overridable so the skip path can be exercised without turning off a network.
+AXIOS_UPSTREAM="${RESWEEP_FIXTURE_UPSTREAM:-https://github.com/axios/axios.git}"
+EXIT_SKIPPED=0
+
+if [ -d "$AXIOS_CACHE/.git" ]; then
+  # Verified on every run rather than assumed. A cache is shared mutable state
+  # on a developer's machine, and a copy that has drifted produces a wrong
+  # comparison with nothing in the report revealing it.
+  FOUND="$(git -C "$AXIOS_CACHE" rev-parse "$AXIOS_PIN^{commit}" 2>/dev/null)"
+  if [ "$FOUND" != "$AXIOS_PIN" ]; then
+    printf 'the fixture at %s does not contain %s
+' "$AXIOS_CACHE" "$AXIOS_PIN" >&2
+    printf 'this is drift, not absence, and every score from it would be wrong.
+' >&2
+    printf 'fetch that commit or remove the directory and let it be cloned again.
+' >&2
+    exit 1
+  fi
+elif git ls-remote --exit-code "$AXIOS_UPSTREAM" HEAD >/dev/null 2>&1; then
+  printf 'no local copy of the fixture; cloning it once into %s
+' "$AXIOS_CACHE"
+  mkdir -p "$(dirname "$AXIOS_CACHE")"
+  if ! git clone --quiet "$AXIOS_UPSTREAM" "$AXIOS_CACHE"; then
+    printf 'the clone failed, so there is no fixture to measure against
+' >&2
+    exit 1
+  fi
+else
+  printf 'SKIP no local copy of the fixture at %s and the upstream is unreachable.
+' "$AXIOS_CACHE"
+  printf '     This is a skip and not a failure: nothing was measured, and nothing
+'
+  printf '     is claimed. Set RESWEEP_FIXTURE_DIR to a checkout, or run again with
+'
+  printf '     a network.
+'
+  exit "$EXIT_SKIPPED"
+fi
+
 if ! git -C "$REPO" worktree add --detach --quiet "$WORKTREE" HEAD; then
   printf 'could not create a worktree; is this a git repository?\n' >&2
   exit 1
@@ -103,6 +155,9 @@ STATUS=$?
 
 if [ -f "$WORKTREE/result.json" ]; then
   mkdir -p "$REPO/evals/results"
+  # EVAL_JSON lets a caller keep a result of its own rather than have it
+  # overwritten by the next run.
+  cp "$WORKTREE/result.json" "${EVAL_JSON:-$REPO/evals/results/last-run.json}"
   cp "$WORKTREE/result.json" "$REPO/evals/results/last-run.json"
   # A target that fails to resolve as a plugin collapses to one arm and reports
   # a single score that reads exactly like a comparison. Assert both ran.
