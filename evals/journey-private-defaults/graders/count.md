@@ -2,18 +2,33 @@
 type: llm
 weight: 2
 ---
-The answer states how many places supply a fallback with `||` or `??`, and that
-number is 123.
+The answer gives both numbers the question needs, and distinguishes them.
 
-Weighted double, because it is the whole question. The operator said they are
-about to change every one of them; a number that is wrong by ten means ten sites
-silently keep the old behaviour, and a number given without confidence means the
-work cannot start.
+There are 123 places in this tree where `||` or `??` appears as an operator.
+That is the candidate set and it is a syntactic fact. Not all of them supply a
+fallback: some are boolean tests, `if (!key || !data)` and the like, where the
+operator is combining conditions rather than defaulting. Deciding which is which
+is a judgement, and the operator asked about the ones that supply a fallback.
 
-Passes on 123, written as a figure or in words.
+Passes when the answer gives the candidate total of 123 and a judged total of
+the subset that actually supplies a fallback, and makes clear which is which. An
+answer of the form "123 uses of the operators, of which N supply a fallback,
+the rest being boolean conditions" is exactly right, and the value of N is not
+graded here: it is a judgement over 123 sites and reasonable readings differ.
 
-Fails on any other total. Fails on a range, an approximation, or an "at least"
-figure, because none of those answers the question that was asked. Fails if the
-answer gives only a count of files, or a count of lines, rather than of places:
-a line holding two operators is two places, and conflating them is the specific
-error a text search makes here.
+Passes if the two numbers are given in either order or in different words, as
+long as a reader can tell the enumerated set from the judged subset.
+
+Fails when only one number is given, because then a reader cannot tell whether
+the work covered everything and judged some, or covered only some. That
+ambiguity is the whole thing this tool exists to remove.
+
+Fails when the candidate total is not 123, since the enumeration is mechanical
+and there is a right answer. Fails on a range or an approximation for that
+total, and fails when a count of lines or of files is offered in place of a
+count of places: a line holding two operators is two places.
+
+This grader was rewritten after a run reported "123 total, 89 supply a
+fallback", with the 34 boolean conditions named, and was marked wrong by a
+version that demanded the bare figure 123. That run had given a better answer
+than the grader knew how to ask for.
