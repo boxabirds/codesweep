@@ -12,7 +12,7 @@ REPO="$(cd "$HERE/.." && pwd)"
 EVALS="$REPO/evals"
 # The cases that must exist. Named, so deleting one is a failure rather than a
 # smaller suite nobody notices.
-EXPECTED_CASES="journey-axios-catch trigger-caller-finding trigger-rename trigger-scoped-audit trigger-single-literal"
+EXPECTED_CASES="journey-axios-catch journey-private-defaults trigger-caller-finding trigger-rename trigger-scoped-audit trigger-single-literal"
 
 PASS=0
 FAIL=0
