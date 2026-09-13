@@ -76,3 +76,6 @@ features = [
 # more than once, so a split on it counted each match twice and blamed the
 # engine for the parser's mistake.
 serde_json = "1"
+
+# The walker again, to list a directory in a test without reimplementing one.
+ignore = "0.4"

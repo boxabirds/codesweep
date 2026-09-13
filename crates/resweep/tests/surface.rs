@@ -233,3 +233,47 @@ fn the_subcommand_list_is_the_one_the_replaced_tool_offered() {
         .expect("the refusal lists the commands");
     assert_eq!(listed.split(',').count(), 10, "the surface grew or shrank: {listed}");
 }
+
+#[test]
+fn the_trigger_sentences_in_the_guidance_are_untouched() {
+    // The description decides whether the tool is reached for at all. It is
+    // measured by a probe round this story does not run, so the only
+    // protection here is that nobody edited it. Compared literally against the
+    // version before the port, with the name allowed to differ because the
+    // rename is the one commit in between.
+    const BEFORE_THE_PORT: &str = "80187f6";
+    const GUIDANCE_THEN: &str = "skills/codesweep/SKILL.md";
+
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
+        .arg("show")
+        .arg(format!("{BEFORE_THE_PORT}:{GUIDANCE_THEN}"))
+        .output()
+        .expect("git runs");
+    if !out.status.success() {
+        eprintln!("SKIP: the guidance is not reachable at {BEFORE_THE_PORT}");
+        return;
+    }
+
+    let description = |text: &str| -> String {
+        text.lines()
+            .find(|l| l.starts_with("description:"))
+            .unwrap_or_else(|| panic!("no description line"))
+            .replace("codesweep", "TOOLNAME")
+            .replace("resweep", "TOOLNAME")
+    };
+
+    let then = description(&String::from_utf8_lossy(&out.stdout));
+    let now = description(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../skills/resweep/SKILL.md"),
+        )
+        .expect("the guidance is in the working tree"),
+    );
+    assert_eq!(then, now, "the trigger sentences changed during the port");
+
+    // And it is not empty, because an equality that compares nothing to
+    // nothing would pass just as well.
+    assert!(then.len() > 200, "the description is suspiciously short: {then}");
+}

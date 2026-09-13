@@ -300,8 +300,19 @@ const LATE_COLUMNS: &[(&str, &str, &str)] = &[
     ("verdict", "method", "TEXT NOT NULL DEFAULT ''"),
 ];
 
+/// Open the ledger for a repository, at the path this session implies.
 pub fn connect(root: &Path, create: bool) -> Result<Connection, LedgerError> {
-    let path = ledger_path(root)?;
+    connect_at(&ledger_path(root)?, create)
+}
+
+/// Open a named ledger.
+///
+/// Separated from `connect` because that one reads the session out of the
+/// environment, which is right for a command that runs once and wrong for
+/// anything that has to open a particular file: a caller holding a path should
+/// not have to arrange the environment to get it opened.
+pub fn connect_at(path: &Path, create: bool) -> Result<Connection, LedgerError> {
+    let path = path.to_path_buf();
     if !create && !path.exists() {
         return Err(LedgerError::Absent { path });
     }

@@ -246,17 +246,21 @@ fn a_ledger_written_by_python_is_read_by_rust_and_back_again() {
         .expect("the tool runs");
     assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
 
-    std::env::set_var(ledger::SESSION_ENV_OVERRIDE, &session);
+    // Built from the session name, not read from the environment: cases in
+    // one binary share that environment and run in parallel.
     let written = std::env::temp_dir()
         .join(RETIRED_NAMESPACE)
         .join(&session)
         .join(format!("{}.db", ledger::repo_slug(&work)));
     assert!(written.exists(), "the Python tool wrote nothing at {written:?}");
-    let path = ledger::ledger_path(&work).expect("a ledger path");
+    let path = std::env::temp_dir()
+        .join(ledger::TEMP_NAMESPACE)
+        .join(&session)
+        .join(format!("{}.db", ledger::repo_slug(&work)));
     std::fs::create_dir_all(path.parent().expect("a session directory")).expect("a place to put it");
     std::fs::copy(&written, &path).expect("the ledger is carried across");
 
-    let conn = ledger::connect(&work, false).expect("the ledger opens");
+    let conn = ledger::connect_at(&path, false).expect("the ledger opens");
     let version: String = conn
         .query_row("SELECT value FROM meta WHERE key = 'schema_version'", [], |r| r.get(0))
         .expect("the version is recorded");
