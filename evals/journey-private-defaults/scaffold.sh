@@ -11,7 +11,13 @@
 # question touches.
 set -euo pipefail
 
-SOURCE="${CEETRIX_REPO:-$HOME/expts/claude-backlog}/workers/admin/src"
+# $HOME is remapped for the run, so the operator's checkout is found through the
+# user database rather than through the environment. Without this the scaffold
+# looks inside the sandbox, finds nothing, and refuses on every machine
+# including the ones that have the checkout. The axios fixture does the same
+# thing for the same reason.
+REAL_HOME=$(eval echo "~$(id -un)")
+SOURCE="${CEETRIX_REPO:-$REAL_HOME/expts/claude-backlog}/workers/admin/src"
 
 if [ ! -d "$SOURCE" ]; then
   echo "no private checkout at $SOURCE" >&2
