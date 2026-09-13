@@ -1,0 +1,17 @@
+schema_version: "1.0"
+name: journey-axios-catch
+# Three runs, because a single run of a judged case is an anecdote. The
+# baseline arm is the comparison, so this is six agent runs.
+runs: 3
+context:
+  scaffold_script: scaffold.sh
+execution:
+  # Every step of the journey is a shell command. Without Bash the arm that
+  # reaches for the tool fires it and then cannot act, which was observed
+  # burning every remaining turn and scoring zero for the wrong reason.
+  max_turns: 40
+  allowed_tools: [Read, Glob, Grep, Skill, Bash]
+  # Phrased as an operator would type it. It names no tool, instructs no
+  # command, and constrains no format: an agent that satisfies a format without
+  # doing the work would score well on a worse question.
+  prompt: "Every catch block in lib/ — which ones swallow the error so the caller never sees it? I need to be sure none were missed."
