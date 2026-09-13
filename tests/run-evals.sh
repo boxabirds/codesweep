@@ -145,9 +145,15 @@ cd "$WORKTREE" || exit 1
 # every remaining turn. --scaffold because a case with no repository in its
 # working directory asks a question about code that does not exist, and both
 # arms then answer correctly that the directory is empty.
+# --threshold 0 because this is a measurement, not a gate. The harness exits
+# non-zero when any case scores below the threshold, which for a suite whose
+# whole purpose is to report a number would make a low score indistinguishable
+# from a broken run, and would undo the distinction between a skip and a
+# failure that the fixture resolution above exists to draw.
 claude plugin eval . \
   --trust-plugin \
   --scaffold \
+  --threshold 0 \
   --allow-tools Bash \
   --json "$WORKTREE/result.json" \
   "${ARGS[@]}"

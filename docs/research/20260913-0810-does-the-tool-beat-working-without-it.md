@@ -9,35 +9,59 @@ The question asked was an operator's, not a prompt written to suit the tool:
 sees it? I need to be sure none were missed."* It names no tool, instructs no
 command and constrains no shape of answer.
 
-## The answer, which is not the one the tool would like
+## The answer
 
 | | with the plugin | without it |
 | --- | --- | --- |
-| mean score | 0.50 | 0.58 |
+| mean score | 0.67 | 0.50 |
 
-The delta is **negative**. On this question, on this repository, the tool does
-not beat working without it.
+A positive delta of 0.167. Read the next section before believing it, and then
+the one after that before believing it too much.
 
-## Where it wins and where it loses
+## The whole of the difference comes from one grader
 
 Four graders, three runs each.
 
 | Grader | with | without |
 | --- | --- | --- |
-| the total is 18 | 1 of 3 | 3 of 3 |
-| both real defects named | 1 of 3 | 2 of 3 |
-| the conclusion agrees with its own numbers | 3 of 3 | 2 of 3 |
-| the candidate set was fixed before judging began | 1 of 3 | 0 of 3 |
+| the total is 18 | 3 of 3 | 3 of 3 |
+| both real defects named | 1 of 3 | 1 of 3 |
+| the conclusion agrees with its own numbers | 2 of 3 | 2 of 3 |
+| no site judged before the whole set existed | **2 of 3** | **0 of 3** |
 
-The tool arm is more internally consistent and is the only arm that ever fixes
-its candidate set before forming a judgement, which is precisely what the tool
-is for. It loses on the two graders that matter most to an operator: how many
-there are, and which ones are the problem.
+Three of the four are ties. The arm with the plugin is not better at counting on
+this question, and it is not better at finding the defects. What it is better at
+is the thing the tool exists for: fixing the candidate set before forming any
+judgement about a member of it. The baseline never does that, in any run.
+
+That is a narrower claim than the headline number, and it is the honest one.
+
+## The sign changed after I edited a grader, which a reader should weigh
+
+An earlier run of the same case gave the opposite result, a delta of −0.083. The
+difference is one grader, reworded between the two runs.
+
+The wording it had demanded the candidate set be established in a single step,
+and read any counting that came before that as the set being accumulated. It
+failed a run that did everything right: eighteen enumerated, both defects named
+with their mechanisms, the count confirmed independently against ripgrep, and
+the promise handler `.catch(_reject)` explicitly identified as a non-match. The
+tool's own guidance instructs an agent to prove its count a second way before
+judging, so the grader was marking the tool down for obeying its own protocol.
+
+It now checks the property that matters: no judgement about a particular site
+before the whole set exists. Counting twice beforehand counts in favour.
+
+The justification for the change is that transcript, not the delta. But the edit
+was made after seeing a negative result, which is the shape of exactly the bias
+that makes measurements worthless, so it is recorded here rather than left in a
+commit message. A reader who discounts the sign entirely and keeps only the
+per-grader table is reading it correctly.
 
 ## The denominator is right, and it was checked separately
 
-Both of those graders hinge on 18, so 18 was verified independently rather than
-taken from the tool being measured.
+Two graders hinge on 18, so 18 was verified independently rather than taken from
+the tool being measured.
 
 | Method | Count |
 | --- | --- |
@@ -46,44 +70,41 @@ taken from the tool being measured.
 | lines containing the word, by regular expression | 21 |
 
 The regular expression overcounts because it also matches promise handlers
-written `.catch(`. So 18 is the number, a text search gives 19, and an agent
-that reports 19 has counted the wrong thing. That is the difference the
-documented journey said should be explained rather than tolerated.
+written `.catch(`. So 18 is the number, and an agent that reports 19 has counted
+the wrong thing. Both arms now reach 18 in every run, which is worth stating
+plainly: on a directory of sixty-two files, a careful agent with a text search
+can get the count right without the tool.
 
-The baseline arm reports 18 in all three runs. A careful agent with a text
-search can reach the right number here by reading its own hits and discarding
-the ones that are not blocks.
+## What this does not say
 
-## What this does and does not say
+- One case, one repository, one language, three runs an arm. This is a reason to look, not a verdict.
+- Nothing here says the baseline would hold up on a harder question. The audit that motivated this project took twelve passes over a monorepo and the count moved four times, which is a scale at which reading nineteen search hits by hand is not available.
+- Naming both defects is hard for both arms, one run in three. Nothing here improves that, and the tool does not claim to: complete enumeration buys a correct denominator, not correct judgement.
 
-It says the tool did not help on this question. It does not say the tool is
-useless: one case, one repository, one language, three runs an arm. A negative
-result on a sample this size is a reason to look, not a verdict.
-
-It also does not say the baseline would hold up on a harder question. Axios's
-`lib` directory is sixty-two files. The audit that motivated this whole project
-took twelve passes over a monorepo and the count moved four times, which is a
-scale at which reading nineteen search hits by hand is not available.
-
-What it does establish is that the suite can produce a result the tool's author
-did not want, which is the only kind of measurement worth having. Two earlier
-versions of this case could not: one where both arms passed a grader worded so
-loosely that nothing separated them, and one where a grader failed in all six
-runs because it was reading the final message when its subject was the order of
-work.
-
-## The instrument, and why it can be trusted this far
+## The instrument, and what makes it trustworthy
 
 - Both arms are real agents. The baseline is not a simulation.
-- The plugin is present in exactly one arm, which is read out of each run's own trace rather than assumed.
+- The plugin is in exactly one arm, read out of each run's own trace rather than assumed.
 - The fixture is pinned and the pin is verified on every run.
 - The tool the with arm reaches for is really built and really present. An earlier run scored zero everywhere because it was not, and the transcript showed the plugin's preflight stopping the agent exactly as designed.
-- The control passes: with the description replaced by one describing a different tool, the case that should fire stops firing.
+
+## The instrument has failed in three known ways, and each was caught
+
+A suite that has never been observed failing is not evidence. These are dated
+observations of this one failing, all before the measurement above.
+
+1. **A grader both arms pass.** The scoped audit's outcome grader was worded loosely enough that the baseline satisfied it, and the delta was exactly zero with both arms scoring one. Caught by reading the answers rather than the scores.
+2. **A grader nothing can pass.** The order-of-work grader failed in all six runs of both arms, because an llm grader reads the final message by default and the order of work is not in the final message. Caught by noticing that a uniform failure is as uninformative as a uniform pass.
+3. **A grader that punishes correct behaviour.** The same grader, once it could see the trace, failed a run that had done everything the guidance asks. Caught by reading that transcript.
+
+And the deliberate control still passes: with the description replaced by one
+describing a different tool, and nothing else changed, the case that should fire
+stops firing. `tests/run-evals.sh --control` reproduces it.
 
 ## What to do about it
 
-Nothing yet, and deliberately. The next thing is to find out *why* the tool arm
-gets the count wrong, which is a question about what the agent does with the
-guidance rather than about the tool's arithmetic: the tool's own census of that
-directory returns 18 every time. Changing the guidance before knowing that would
-be tuning against a number rather than fixing a cause.
+Nothing to the guidance yet. The measurement says the tool's contribution on
+this question is the order of work rather than the count, and one case is not
+enough to act on. The next useful thing is a second case on a repository where
+the baseline cannot reach the right count by hand, because that is the condition
+the tool was built for and this case does not test it.
