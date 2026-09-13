@@ -27,6 +27,12 @@ const PYTHON_TOOL_COMMIT: &str = "80187f6";
 const PYTHON_TOOL_PATH: &str = "bin/codesweep";
 
 /// Extract the Python tool from version control, once per process.
+///
+/// Written under a name of its own and then renamed into place. Tests in one
+/// binary run in parallel threads, and a plain write leaves the file existing
+/// but incomplete for as long as it takes to fill: another thread then sees it,
+/// reads half a script, and fails for a reason that has nothing to do with what
+/// it was testing. A rename is atomic, so the file is either absent or whole.
 fn python_tool() -> Option<PathBuf> {
     let path = std::env::temp_dir().join(format!("resweep-python-{}", std::process::id()));
     if path.exists() {
@@ -42,7 +48,9 @@ fn python_tool() -> Option<PathBuf> {
     if !out.status.success() || out.stdout.is_empty() {
         return None;
     }
-    std::fs::write(&path, &out.stdout).ok()?;
+    let staged = path.with_extension(format!("{:?}", std::thread::current().id()));
+    std::fs::write(&staged, &out.stdout).ok()?;
+    std::fs::rename(&staged, &path).ok()?;
     Some(path)
 }
 
