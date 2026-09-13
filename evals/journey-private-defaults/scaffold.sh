@@ -11,15 +11,14 @@
 # question touches.
 set -euo pipefail
 
-# $HOME is remapped for the run, so the operator's checkout is found through the
-# user database rather than through the environment. Without this the scaffold
-# looks inside the sandbox, finds nothing, and refuses on every machine
-# including the ones that have the checkout. The axios fixture does the same
-# thing for the same reason.
-REAL_HOME=$(eval echo "~$(id -un)")
-SOURCE="${CEETRIX_REPO:-$REAL_HOME/expts/claude-backlog}/workers/admin/src"
+# The path arrives in the environment, set by tests/run-evals.sh before the
+# harness starts. It cannot be worked out here: HOME is remapped inside a run,
+# and resolving the real one through the user database does not survive the
+# sandbox either. Both were tried and both refused on a machine that has the
+# checkout.
+SOURCE="${CEETRIX_REPO:-}/workers/admin/src"
 
-if [ ! -d "$SOURCE" ]; then
+if [ -z "${CEETRIX_REPO:-}" ] || [ ! -d "$SOURCE" ]; then
   echo "no private checkout at $SOURCE" >&2
   echo "this case measures against a codebase that is not part of this project." >&2
   echo "set CEETRIX_REPO to a checkout, or filter this case out." >&2

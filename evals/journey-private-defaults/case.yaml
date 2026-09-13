@@ -4,11 +4,20 @@ name: journey-private-defaults
 # this case runs only where a checkout exists and fails loudly where one does
 # not, rather than quietly measuring an empty directory.
 tags: [private]
-runs: 3
+# Two rather than three. Each run takes minutes on a tree this size and the
+# comparison is four runs either way; a third would buy a little variance
+# information for a lot of wall clock.
+runs: 2
 context:
   scaffold_script: scaffold.sh
 execution:
   max_turns: 40
+  # The default of 300 seconds is not enough here and that was measured: two
+  # runs were cut off at twenty-six and twenty-nine turns, mid-work, and scored
+  # as failures for a reason that has nothing to do with the answer. A tree of
+  # fifty-one files with a hundred and twenty three sites takes longer than five
+  # minutes to establish and describe.
+  timeout_seconds: 900
   allowed_tools: [Read, Glob, Grep, Skill, Bash]
   # The shape of the audit that motivated this whole project: not "find me some
   # examples" but "I am about to change every one of these, so how many are
