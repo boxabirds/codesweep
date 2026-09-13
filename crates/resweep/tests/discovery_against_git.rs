@@ -232,3 +232,113 @@ fn a_relative_scope_resolves_against_the_root_and_not_the_working_directory() {
     );
     assert_eq!(discovery::resolve_scope(root, None), root.to_path_buf());
 }
+
+/// A tree built for the purpose, so every expectation is a count of things
+/// that were put there on purpose.
+struct Tree(PathBuf);
+
+impl Tree {
+    fn new(label: &str) -> Self {
+        let dir = std::env::temp_dir().join(format!("resweep-tree-{}-{label}", std::process::id()));
+        std::fs::remove_dir_all(&dir).ok();
+        std::fs::create_dir_all(&dir).expect("a directory");
+        Self(dir)
+    }
+    fn file(&self, rel: &str, body: &str) -> &Self {
+        let path = self.0.join(rel);
+        std::fs::create_dir_all(path.parent().expect("a parent")).expect("a directory");
+        std::fs::write(path, body).expect("a file");
+        self
+    }
+    fn files(&self) -> Vec<String> {
+        discovery::discover(&self.0).files
+    }
+}
+
+impl Drop for Tree {
+    fn drop(&mut self) {
+        std::fs::remove_dir_all(&self.0).ok();
+    }
+}
+
+#[test]
+fn a_vendored_directory_contributes_nothing() {
+    let t = Tree::new("vendored");
+    t.file("src/a.ts", "x\n")
+        .file("node_modules/pkg/index.js", "x\n")
+        .file("vendor/lib/thing.rb", "x\n");
+    assert_eq!(t.files(), vec!["src/a.ts".to_string()]);
+}
+
+#[test]
+fn a_build_output_directory_contributes_nothing() {
+    let t = Tree::new("built");
+    t.file("src/a.ts", "x\n")
+        .file("dist/a.js", "x\n")
+        .file("target/release/thing", "x\n")
+        .file("build/out.o", "x\n");
+    assert_eq!(t.files(), vec!["src/a.ts".to_string()]);
+}
+
+#[test]
+fn a_file_matching_an_ignore_rule_contributes_nothing_and_one_that_does_not_contributes() {
+    let t = Tree::new("ignored");
+    t.file(".gitignore", "*.log\nsecret/\n")
+        .file("src/a.ts", "x\n")
+        .file("noise.log", "x\n")
+        .file("secret/keys.ts", "x\n");
+    // The ignore file itself is a tracked file in every repository that has
+    // one, so it is in scope, and leaving it out would be its own drift.
+    assert_eq!(t.files(), vec![".gitignore".to_string(), "src/a.ts".to_string()]);
+}
+
+#[test]
+fn an_empty_scope_yields_nothing_and_does_not_crash() {
+    let t = Tree::new("empty");
+    assert!(t.files().is_empty());
+}
+
+#[test]
+fn a_scope_with_exactly_one_file_yields_one() {
+    let t = Tree::new("one");
+    t.file("only.ts", "x\n");
+    assert_eq!(t.files(), vec!["only.ts".to_string()]);
+}
+
+#[test]
+fn the_exclusion_set_is_the_one_the_replaced_tool_hardcoded() {
+    // A drift here means the two tools disagree about what is in scope while
+    // both report confidently, which is the defect class this whole story
+    // guards against. Read it out of the replaced tool rather than restating
+    // it, and read that tool out of version control.
+    const PYTHON_TOOL_COMMIT: &str = "80187f6";
+    const PYTHON_TOOL_PATH: &str = "bin/codesweep";
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo())
+        .arg("show")
+        .arg(format!("{PYTHON_TOOL_COMMIT}:{PYTHON_TOOL_PATH}"))
+        .output()
+        .expect("git runs");
+    if !out.status.success() {
+        eprintln!("SKIP: the replaced tool is not reachable at {PYTHON_TOOL_COMMIT}");
+        return;
+    }
+    let source = String::from_utf8_lossy(&out.stdout);
+    let block = source
+        .split("UNWALKED_DIRS = {")
+        .nth(1)
+        .and_then(|rest| rest.split('}').next())
+        .expect("the tool declares an exclusion set");
+    let mut hardcoded: Vec<String> = block
+        .split(',')
+        .map(|s| s.trim().trim_matches('"').trim_matches('\'').trim().to_string())
+        .filter(|s| !s.is_empty() && !s.starts_with('#'))
+        .collect();
+    hardcoded.sort();
+    hardcoded.dedup();
+
+    let mut ours: Vec<String> = discovery::UNWALKED_DIRS.iter().map(|s| s.to_string()).collect();
+    ours.sort();
+    assert_eq!(ours, hardcoded, "the exclusion sets have drifted apart");
+}
