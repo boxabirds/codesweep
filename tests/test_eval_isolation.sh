@@ -9,6 +9,10 @@
 # installs a real decoy into the operator's real configuration and then looks in
 # the run's own trace to see what was offered. Nothing is mocked, and the decoy
 # is removed afterwards whether the checks pass or not.
+#
+# Not in tests/run-all.sh. It starts two real agents and costs model time, so it
+# runs by hand alongside the measurement rather than with the suites that cost
+# nothing.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
