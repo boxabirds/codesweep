@@ -12,7 +12,7 @@
   "sites_new": 0,
   "sites_departed": 0,
   "unjudged": 0,
-  "file_discovery": "git",
+  "file_discovery": "ignore-files",
   "note": "The census is complete with respect to these rules only. A site whose code changed since it was judged returns as new and needs judging again.",
   "WARNING_uncovered_extensions": {
     ".js": 62

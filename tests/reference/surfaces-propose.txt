@@ -1,7 +1,7 @@
 --- stdout
 {
   "sweep": "s",
-  "file_discovery": "git",
+  "file_discovery": "ignore-files",
   "proposed": [
     {
       "name": "source: src",

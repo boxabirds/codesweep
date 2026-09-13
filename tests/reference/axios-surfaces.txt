@@ -1,7 +1,7 @@
 --- stdout
 {
   "sweep": "big",
-  "file_discovery": "git",
+  "file_discovery": "ignore-files",
   "proposed": [
     {
       "name": "automated checks",

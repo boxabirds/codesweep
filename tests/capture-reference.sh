@@ -20,7 +20,13 @@ set -uo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MODE="${1:-compare}"
 OUT="$HERE/reference"
-TOOL="${RESWEEP_BIN:-$HERE/../bin/resweep}"
+# The Rust binary by default, because that is now the tool the reference
+# describes. The recording was taken from the Python tool at 80187f6 and the
+# port reproduces all thirty-three, with one deliberate exception recorded in
+# its own commit: file_discovery reports which ignore rules applied rather than
+# which program was asked. The Python tool therefore differs from the reference
+# in that one field, and will until it is removed.
+TOOL="${RESWEEP_BIN:-$HERE/../target/release/resweep}"
 RULES_DIR="$HERE/../rules"
 
 # The second fixture is a real third-party repository at a fixed commit. A
@@ -49,6 +55,17 @@ BIG="$TMPROOT/big"
 mkdir -p "$WORK" "$RULES"
 cleanup() { rm -rf "$TMPROOT" "$NEW_SESSION" "$OLD_SESSION"; }
 trap cleanup EXIT
+
+if [ ! -x "$TOOL" ]; then
+  if command -v cargo >/dev/null 2>&1; then
+    printf 'building the port first\n'
+    (cd "$HERE/.." && cargo build -p resweep --release --quiet) || {
+      printf 'the port will not build, so there is nothing to compare\n'; exit 1; }
+  else
+    printf 'SKIP no binary at %s and no cargo to build one\n' "$TOOL"
+    exit 0
+  fi
+fi
 
 cat > "$RULES/catch.yml" <<'EOF'
 id: ts-catch
