@@ -9,11 +9,6 @@ hide exactly what the capture exists to catch.
 import re
 import sys
 
-# The continuation lines of an argparse usage block are indented to the width
-# of the program name, so two names of different lengths shift every wrapped
-# line sideways. That is the name's length, not its content.
-USAGE_CONTINUATION_INDENT = "  "
-
 # The old name is deliberate and must survive a future rename: this has to
 # normalise both names for a comparison that spans one. A bulk substitution ate
 # the equivalent line in the shell version once already, leaving the pattern
@@ -43,18 +38,28 @@ def main() -> int:
         text = pattern.sub(replacement, text)
     text = TOOL_NAMES.sub("TOOLNAME", text)
 
+    # A usage block is folded onto one line. Argparse wraps it to the terminal
+    # width and indents the continuations to the width of the program name, so
+    # both where it breaks and how far it indents belong to the terminal and to
+    # the name rather than to the tool. Which options are offered, and in which
+    # order, is the part under comparison and survives the fold.
     out = []
-    in_usage = False
+    usage = None
     for line in text.split("\n"):
         if line.startswith("usage:"):
-            in_usage = True
-            out.append(line)
+            if usage is not None:
+                out.append(usage)
+            usage = line.rstrip()
             continue
-        if in_usage and line[:1] == " ":
-            out.append(USAGE_CONTINUATION_INDENT + line.lstrip(" "))
+        if usage is not None and line[:1] == " ":
+            usage = f"{usage} {line.strip()}"
             continue
-        in_usage = False
+        if usage is not None:
+            out.append(usage)
+            usage = None
         out.append(line)
+    if usage is not None:
+        out.append(usage)
     sys.stdout.write("\n".join(out))
     return 0
 

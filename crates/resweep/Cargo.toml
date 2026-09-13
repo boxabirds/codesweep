@@ -24,6 +24,14 @@ sha2 = "0.10"
 # has, rather than asking another program which files exist.
 ignore = "0.4"
 
+clap = { version = "4.5", features = ["derive"] }
+
+# preserve_order on purpose. The output's key order is part of the contract the
+# existing suites compare against, and a map that sorts its keys would reorder
+# every payload the tool prints.
+serde_json = { version = "1", features = ["preserve_order"] }
+serde = { version = "1", features = ["derive"] }
+
 # The language set is chosen here rather than at runtime, so an unsupported
 # language is a fact the compiler knows. It is every language the Python tool
 # claims, minus scss: the crate has no scss grammar, and the CSS grammar parses
