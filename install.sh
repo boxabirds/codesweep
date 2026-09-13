@@ -18,9 +18,8 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLI_SOURCE="$HERE/bin/resweep"
 SKILL_SOURCE="$HERE/skills/resweep"
 
-# Minimum Python that supports the syntax and stdlib this CLI uses.
-MIN_PY_MAJOR=3
-MIN_PY_MINOR=9
+# Where cargo puts the binary this script installs.
+BUILT="$HERE/target/release/resweep"
 
 CHANGED=0
 PROBLEMS=0
@@ -67,33 +66,47 @@ SKILL_LINK="$SKILL_DIR/resweep"
 
 # ---------------------------------------------------------------- dependencies
 
+# The tool is built here rather than downloaded, because a plugin cannot carry
+# a build for every machine. Measured, not assumed: neither the plugin manifest
+# nor the marketplace entry has any field naming an operating system or a
+# processor, and a manifest declaring a platform this machine is not still
+# installs and still runs. Shipping every build instead would be over two
+# hundred megabytes in a repository that is cloned on every install, because the
+# language grammars are almost the whole binary.
+#
+# So one prerequisite, a Rust toolchain, and nothing at all at run time: the
+# matching engine and the storage engine are compiled in.
 check_dependencies() {
   echo "dependencies"
 
-  if command -v ast-grep >/dev/null 2>&1; then
-    ok "ast-grep $(ast-grep --version 2>/dev/null | awk '{print $2}')"
-  elif command -v sg >/dev/null 2>&1; then
-    ok "ast-grep (as sg)"
+  if command -v cargo >/dev/null 2>&1; then
+    ok "cargo $(cargo --version 2>/dev/null | awk '{print $2}')"
   else
-    bad "ast-grep is not on PATH"
-    if command -v brew >/dev/null 2>&1; then
-      say "     install it with: brew install ast-grep"
-    else
-      say "     install it from: https://ast-grep.github.io/guide/quick-start.html"
-    fi
-    say "     resweep will not run without it, and will not fall back to a"
-    say "     text search, because a text search cannot give the guarantee it exists to provide."
+    bad "cargo is not on PATH, so resweep cannot be built"
+    say "     install a Rust toolchain from https://rustup.rs"
+    say "     Nothing else is needed. The matching engine and the storage engine"
+    say "     are compiled into the binary, so there is no second program to"
+    say "     install and no version of one to be wrong."
   fi
+}
 
-  if command -v python3 >/dev/null 2>&1; then
-    if python3 -c "import sys; sys.exit(0 if sys.version_info >= ($MIN_PY_MAJOR, $MIN_PY_MINOR) else 1)"; then
-      ok "python3 $(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:3])))')"
-    else
-      bad "python3 is older than $MIN_PY_MAJOR.$MIN_PY_MINOR"
-    fi
-  else
-    bad "python3 is not on PATH"
+build() {
+  echo "build"
+  if ! command -v cargo >/dev/null 2>&1; then
+    bad "skipped: no cargo"
+    return
   fi
+  # Quiet unless it fails. A successful build has nothing to say and a failed
+  # one has everything, so the output is worth seeing only in the second case.
+  local log
+  log="$(mktemp)"
+  if (cd "$HERE" && cargo build -p resweep --release --quiet) >"$log" 2>&1; then
+    ok "built $BUILT ($(du -h "$BUILT" 2>/dev/null | awk '{print $1}'))"
+  else
+    bad "the build failed"
+    sed 's/^/       /' "$log"
+  fi
+  rm -f "$log"
 }
 
 # ---------------------------------------------------------------- linking
@@ -218,6 +231,7 @@ case "$MODE" in
 
   install)
     check_dependencies
+    build
     echo
     echo "links"
     link "$CLI_SOURCE" "$CLI_LINK" "cli"

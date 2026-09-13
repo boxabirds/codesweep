@@ -42,7 +42,23 @@ evidence than a `violation` one.
 
 ## The protocol
 
-Follow these steps in order. Do not skip steps 2, 3 or 5.
+Follow these steps in order. Do not skip steps 0, 2, 3 or 5.
+
+### 0. Check the tool is there
+
+```bash
+"${CLAUDE_PLUGIN_ROOT}/bin/resweep" list --root /abs/path/to/repo
+```
+
+Any output at all, including a refusal about a missing ledger, means the tool
+is present and runs. A shell error saying no such file means it is not
+installed, and nothing below will work.
+
+If it is missing, stop and say so, naming the path you tried. Do not fall back
+to searching the codebase yourself and do not carry on with the rest of these
+steps: a set you assembled by choosing what to read is the exact thing this
+tool exists to replace, and presenting one as though it were a census is worse
+than saying the tool is absent.
 
 ### 1. State the question
 
@@ -113,7 +129,7 @@ across .ts and .tsx" is evidence. "The rule looks right" is not.
 ### 4. Census
 
 ```bash
-resweep --root /abs/path/to/repo census <sweep-name> \
+${CLAUDE_PLUGIN_ROOT}/bin/resweep --root /abs/path/to/repo census <sweep-name> \
   --rule rules/ts-catch-clause.yml \
   --rule rules/tsx-catch-clause.yml \
   --scope src \
@@ -140,7 +156,7 @@ the operator's repo.
 ### 5. Take the manifest, before judging anything
 
 ```bash
-resweep --root /abs/path/to/repo manifest <sweep-name>
+${CLAUDE_PLUGIN_ROOT}/bin/resweep --root /abs/path/to/repo manifest <sweep-name>
 ```
 
 This lists every candidate as one line, grouped under its file. Do this
@@ -159,14 +175,14 @@ again. The index is still there and the site ids are unchanged.
 ### 6. Drain the queue
 
 ```bash
-resweep --root /abs/path/to/repo next <sweep-name> --limit 15
+${CLAUDE_PLUGIN_ROOT}/bin/resweep --root /abs/path/to/repo next <sweep-name> --limit 15
 ```
 
 This returns unjudged sites with surrounding source. Judge each one, then record
 the whole batch:
 
 ```bash
-resweep --root /abs/path/to/repo verdict <sweep-name> --from-json - <<'JSON'
+${CLAUDE_PLUGIN_ROOT}/bin/resweep --root /abs/path/to/repo verdict <sweep-name> --from-json - <<'JSON'
 [
   {"site_id": "a1b2c3d4e5f6a7b8", "verdict": "violation",
    "note": "Catches the D1 error and returns an empty array, so a caller cannot distinguish an empty table from a failed query."},
@@ -193,7 +209,7 @@ marking the correct end `na` hides it. The note is where the chain lives.
 To revisit a site after it has left the queue:
 
 ```bash
-resweep --root /abs/path/to/repo show <sweep-name> --site <site_id>
+${CLAUDE_PLUGIN_ROOT}/bin/resweep --root /abs/path/to/repo show <sweep-name> --site <site_id>
 ```
 
 Loop `next` then `verdict` until `next` returns no sites. This is the part that
@@ -203,8 +219,8 @@ happened to see.
 ### 7. Report
 
 ```bash
-resweep --root /abs/path/to/repo status <sweep-name>
-resweep --root /abs/path/to/repo report <sweep-name> -o <path>.md
+${CLAUDE_PLUGIN_ROOT}/bin/resweep --root /abs/path/to/repo status <sweep-name>
+${CLAUDE_PLUGIN_ROOT}/bin/resweep --root /abs/path/to/repo report <sweep-name> -o <path>.md
 ```
 
 `status` prints `live_sites`, `judged` and `unjudged`. The report states the
@@ -283,6 +299,10 @@ configuration so that claim becomes a gate rather than a memory.
 
 ## Requirements
 
-`ast-grep` on PATH (`brew install ast-grep`). resweep refuses to run without
-it rather than falling back to a text search, because a text search cannot give
-the guarantee this whole tool exists to provide.
+The `resweep` binary, at `${CLAUDE_PLUGIN_ROOT}/bin/resweep`. Step 0 checks for
+it. Nothing else: the matching engine and the storage engine are both compiled
+into it, so there is no separate program to install and no version of one to be
+wrong.
+
+It refuses to run rather than falling back to a text search, because a text
+search cannot give the guarantee this whole tool exists to provide.

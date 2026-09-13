@@ -64,7 +64,7 @@ pub struct Candidate {
 pub fn propose(root: &Path) -> (Vec<Candidate>, &'static str) {
     let found = discovery::discover(root);
     let mut seen: Vec<Candidate> = Vec::new();
-    let mut add = |name: String, scope: Option<String>, evidence: &str, seen: &mut Vec<Candidate>| {
+    let add = |name: String, scope: Option<String>, evidence: &str, seen: &mut Vec<Candidate>| {
         if !seen.iter().any(|c| c.name == name) {
             seen.push(Candidate { name, scope, evidence: evidence.to_string() });
         }
