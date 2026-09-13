@@ -11,4 +11,5 @@ pub mod languages;
 pub mod ledger;
 pub mod model;
 pub mod output;
+pub mod resolution;
 pub mod rules;
