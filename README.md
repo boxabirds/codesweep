@@ -5,6 +5,153 @@
 
 # resweep
 
+> **Status: closed, September 2026.** The tool works and is accurate. No
+> differentiator was found that survived measurement. This README is the
+> post-mortem; the original description is kept below for reference.
+
+## What it was for
+
+Refactoring safely means knowing every place a change has to land. A coding
+agent reads some files and tells you what it found. It cannot tell you what it
+missed, and neither can you. The failure is specific and nasty: a small, clean,
+confident, wrong answer.
+
+The bet was that the fix is mechanical enumeration. Declare the shape you care
+about, let a parser list every site matching it, judge them one at a time, and
+let coverage be arithmetic rather than a claim. The agent never decides what
+the candidate set is; it only judges what is in it.
+
+Scope was deliberately narrow: **find what needs to change**. The host agent
+makes the edits.
+
+## What got built
+
+A Rust CLI with ten commands, ast-grep linked as a library, a SQLite ledger of
+sites and verdicts, and a Claude Code skill driving it. 23 languages. Stable
+site identities so a verdict survives the code moving. 41 recorded reference
+outputs and about 300 tests, all passing.
+
+It does what it says. That was never the problem.
+
+## Why it is closed
+
+### 1. Enumeration is not a differentiator
+
+The gate was: does this produce a better list of affected sites than a host
+agent already gets from its own tools? The
+[Refactoring Oracle](https://github.com/tsantalis/RefactoringMiner) supplies a
+human-validated answer key. 27 rename cases, 398 sites, ground truth taken from
+what each commit actually changed:
+
+| | recall | precision | cases exactly right |
+| --- | --- | --- | --- |
+| `grep -w` | 100.0% | 90.2% | 21 of 27 |
+| resweep | 98.5% | 90.7% | 20 of 27 |
+
+Level with a one-line grep. Everything the parser adds — knowing a comment from
+code, a call from a declaration — nets out to nothing on this task.
+
+Separately, against a real symbol index over a private TypeScript codebase, a
+plain function call was 30 of 30, line for line. Accurate, and accuracy turned
+out not to be the scarce thing.
+
+### 2. Where a parser genuinely loses
+
+A React component referenced 21 times across 4 files: **resweep found 0**. Every
+reference was a JSX element, an import clause or a string in a `describe` block.
+A call-pattern rule asks the wrong question and returns zero without saying so.
+`tsserver` finds all 21.
+
+For symbol questions the language server is simply better, and the honest
+answer is to call it rather than reimplement it.
+
+### 3. The remaining 10% needs a symbol index, not a better parser
+
+Both tools sit near 90% precision and fail on the same thing. mockito renamed
+`describeTo` to `describe`: 33 sites must change, 4 must not, because
+Hamcrest's `describeTo` survives and nothing syntactic separates them.
+
+That is the clearest measured case for a resolution layer in this project — and
+it argues for wiring in an existing indexer, not for building anything here.
+
+### 4. The symbol layer is weaker than assumed
+
+The plan was to run both layers and treat the delta as a confidence signal.
+Reading scip-typescript and the TypeScript language service at pinned commits
+killed it:
+
+- SCIP has **no call edges at all**. No caller-to-callee relation, no `Call`
+  bit in the role set. A call graph has to be reconstructed by containment.
+- A call on an `any`-typed receiver emits **no occurrence whatsoever**. Not
+  unresolved — absent. So agreement between the two layers is not evidence of
+  completeness; both can miss the same site and agree.
+
+TypeScript's own Go-to-Implementation is a filtered text search, its shipped
+Call Hierarchy was measured inventing one edge and omitting the only one that
+executes, the tracking issue was closed in 2020 for lack of feedback, and
+Microsoft's own Monaco maintains a hand-written file of fake references as the
+workaround.
+
+### 5. The honesty feature has been shipped since 2011, and may not matter
+
+The last idea standing was to enumerate what the tool could not resolve — file
+and line, not a disclaimer. IntelliJ has done exactly this since March 2011:
+rename preview splits usages into Code, "In Strings, Comments, and Text", and
+**Dynamic**, the last being literally `reference.resolve() == null`. Default on,
+per-location, individually reviewable.
+
+Fifteen years, and nobody carried it into the analysis world. Worse, Christakis
+et al. (VMCAI 2015) instrumented a real analyser, found its assumptions violated
+at runtime in 2–26% of methods, and **no missed errors**. The unresolved set did
+not hide bugs. That makes the pitch warranted trust rather than caught defects,
+which is a much harder thing to sell.
+
+### 6. The context argument is decaying
+
+The ledger's strongest claim was that it decouples job size from context size:
+1037 sites in axios `lib/` cost ~264k tokens of source but only ~10k to hold
+their identities. Real, but the ceiling moved from roughly 390 sites to roughly
+1,970 during this project's own lifetime as context windows grew. What survives
+is work spanning days or several people — smaller than the original pitch.
+
+### 7. And the evidence never arrived
+
+After all of the above, no valid demonstration that anyone is better off ever
+ran. The one recorded ablation scored zero in both arms — a staging bug. Three
+graders were rewritten until they worked, and the current one still fails an
+answer satisfying every clause it states.
+
+Building continued inside that vacuum for far too long. That is the real lesson
+here, more than any finding about parsers.
+
+## What is still true, and unclaimed by anyone
+
+One gap survived every test: **pattern-shaped questions**. "Every place that
+supplies a fallback with `||` or `??`" is not a symbol operation, so no language
+server has a concept for it, and no better analyser will ever produce it. On one
+real codebase that was 123 sites, of which 89 supplied a fallback.
+
+It is also the one claim with no benchmark behind it. The Refactoring Oracle
+catalogues named refactorings and this is not one, so the gate that closed
+everything else could not test it either. Anyone picking this up should start
+there, and should build the evidence before the tool.
+
+## Worth keeping
+
+- `docs/research/` — twelve measured notes, including three wrong turns
+  recorded with what they cost.
+- `tests/bench/oracle/` — the Refactoring Oracle harness, re-runnable, scales
+  to the remaining 305 cases with more clone time.
+- The defect class this project shipped three times: scss, then jsx, then any
+  unknown file extension — each a case of the tool being silent about files it
+  could not read. `SOURCE_EXTENSIONS` derived from the language map means "is
+  this source we failed to read" is answered by "is this something we can
+  read", which can only ever answer no.
+
+---
+
+# What it does (original description)
+
 **Auditing and refactoring safely means knowing every place a change has to
 land. Coding agents don't know.** They read some files and tell you what they
 found. They can't tell you what they missed, and neither can you.
