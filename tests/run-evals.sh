@@ -139,20 +139,11 @@ BREAK_IT
   printf 'control: cases that should fire are expected to STOP firing. A pass here is a failure.\n\n'
 fi
 
-# The private checkout, resolved here as an absolute path and passed in.
-#
-# A scaffold cannot find it for itself: HOME is remapped inside a run, and
-# resolving the real one through the user database does not survive the sandbox
-# either. The axios fixture appears to do so only because it falls back to
-# cloning from upstream when the lookup fails, which a private repository cannot.
-if [ -z "${CEETRIX_REPO:-}" ] && [ -d "$HOME/expts/claude-backlog" ]; then
-  export CEETRIX_REPO="$HOME/expts/claude-backlog"
-fi
-if [ -n "${CEETRIX_REPO:-}" ]; then
-  printf 'private cases will use the checkout at %s\n' "$CEETRIX_REPO"
-else
-  printf 'no private checkout found; cases tagged private will refuse\n'
-fi
+# Nothing is exported for the private cases, and that is not an omission. The
+# harness scrubs the environment before running a scaffold: a run whose runner
+# printed the path still saw the variable empty inside the scaffold. A scaffold
+# that needs a path outside the sandbox has to find it through the user
+# database, which is what the private case and the axios fixture both do.
 
 cd "$WORKTREE" || exit 1
 # Bash because every step of the journey is a shell command: without it the

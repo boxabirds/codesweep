@@ -11,14 +11,18 @@
 # question touches.
 set -euo pipefail
 
-# The path arrives in the environment, set by tests/run-evals.sh before the
-# harness starts. It cannot be worked out here: HOME is remapped inside a run,
-# and resolving the real one through the user database does not survive the
-# sandbox either. Both were tried and both refused on a machine that has the
-# checkout.
-SOURCE="${CEETRIX_REPO:-}/workers/admin/src"
+# Resolved through the user database, not through HOME.
+#
+# Three things were tried and only this one works. $HOME is remapped for the
+# run, so it points inside the sandbox. Exporting a variable from the runner
+# does not reach here either: the harness scrubs the environment, and a run
+# whose runner printed the path still saw the variable empty. Asking the user
+# database for the real home directory does survive, which is what the axios
+# fixture does and why it works.
+REAL_HOME=$(eval echo "~$(id -un)")
+SOURCE="${CEETRIX_REPO:-$REAL_HOME/expts/claude-backlog}/workers/admin/src"
 
-if [ -z "${CEETRIX_REPO:-}" ] || [ ! -d "$SOURCE" ]; then
+if [ ! -d "$SOURCE" ]; then
   echo "no private checkout at $SOURCE" >&2
   echo "this case measures against a codebase that is not part of this project." >&2
   echo "set CEETRIX_REPO to a checkout, or filter this case out." >&2
