@@ -40,6 +40,26 @@ pub const LANGUAGE_EXTENSIONS: &[(&str, &[&str])] = &[
     ("yaml", &[".yml", ".yaml"]),
 ];
 
+/// Languages this build recognises as source but for which no rule can be
+/// written, because no grammar for them is linked.
+///
+/// The distinction matters to the operator and nowhere else. A file no rule
+/// happens to cover is fixed by writing a rule. A file in one of these
+/// languages cannot be, and telling someone to write a rule that cannot exist
+/// wastes their time and, worse, teaches them to ignore the warning.
+///
+/// Dropping these from the extension map instead would make the tool silent
+/// about files it cannot read, which is the failure this whole tool exists to
+/// remove. They stay visible and are labelled honestly.
+pub const UNPARSEABLE_LANGUAGES: &[&str] = &["scss"];
+
+pub fn is_unparseable_extension(ext: &str) -> bool {
+    UNPARSEABLE_LANGUAGES
+        .iter()
+        .filter_map(|name| extensions_for(name))
+        .any(|exts| exts.contains(&ext))
+}
+
 /// Extensions that carry source worth auditing. Used only to decide which
 /// uncovered extensions are worth reporting, so that a scope full of .md and
 /// .lock files does not produce noise.
@@ -70,6 +90,38 @@ mod tests {
         // as unreachable, not quietly dropped from the denominator.
         assert!(SOURCE_EXTENSIONS.contains(&".scss"));
         assert!(!crate::rules::SUPPORTED_LANGUAGES.contains(&"scss"));
+        assert!(is_unparseable_extension(".scss"));
+    }
+
+    #[test]
+    fn a_language_a_rule_can_name_is_never_called_unparseable() {
+        // The two lists are complements, and an overlap would put a language
+        // in a warning saying no rule can name it while a rule names it.
+        for name in crate::rules::SUPPORTED_LANGUAGES {
+            assert!(
+                !UNPARSEABLE_LANGUAGES.contains(name),
+                "{name} is both offered and declared unparseable"
+            );
+            for ext in extensions_for(name).unwrap_or(&[]) {
+                assert!(
+                    !is_unparseable_extension(ext),
+                    "{ext} belongs to {name}, which a rule can name"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn every_unparseable_language_is_still_recognised_as_source() {
+        // Otherwise it would vanish from the denominator instead of being
+        // reported, which is the outcome this list exists to prevent.
+        for name in UNPARSEABLE_LANGUAGES {
+            let exts = extensions_for(name)
+                .unwrap_or_else(|| panic!("{name} is declared unparseable but has no extensions"));
+            for ext in exts {
+                assert!(SOURCE_EXTENSIONS.contains(ext), "{ext} is not counted as source");
+            }
+        }
     }
 
     #[test]

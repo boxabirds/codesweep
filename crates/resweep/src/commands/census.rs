@@ -37,10 +37,17 @@ fn scope_extensions(scope: &Path) -> (BTreeMap<String, usize>, discovery::Method
 }
 
 /// Source extensions in the scope that no census rule's language covers.
-fn uncovered_extensions(
-    present: &BTreeMap<String, usize>,
-    rule_languages: &[String],
-) -> (Map<String, Value>, Vec<String>) {
+/// What the rules did not reach, split by whether anything can be done about it.
+struct Gaps {
+    /// Source no rule covers, which writing a rule would fix.
+    uncovered: Map<String, Value>,
+    /// Source no rule can cover in this build, whatever anyone writes.
+    unparseable: Map<String, Value>,
+    /// Languages named by a rule that this build has no extensions for.
+    unknown: Vec<String>,
+}
+
+fn uncovered_extensions(present: &BTreeMap<String, usize>, rule_languages: &[String]) -> Gaps {
     let mut covered: Vec<&str> = Vec::new();
     let mut unknown: Vec<String> = Vec::new();
     for language in rule_languages {
@@ -50,14 +57,23 @@ fn uncovered_extensions(
         }
     }
     let mut uncovered = Map::new();
+    let mut unparseable = Map::new();
     for (ext, count) in present {
-        if !covered.contains(&ext.as_str()) {
+        if covered.contains(&ext.as_str()) {
+            continue;
+        }
+        // Separated because the advice differs and one of the two pieces of
+        // advice is impossible to follow. Both still count against
+        // completeness; neither disappears from the arithmetic.
+        if languages::is_unparseable_extension(ext) {
+            unparseable.insert(ext.clone(), json!(count));
+        } else {
             uncovered.insert(ext.clone(), json!(count));
         }
     }
     unknown.sort();
     unknown.dedup();
-    (uncovered, unknown)
+    Gaps { uncovered, unparseable, unknown }
 }
 
 pub fn run(root: &Path, args: Args<'_>) {
@@ -245,7 +261,14 @@ pub fn run(root: &Path, args: Args<'_>) {
 
     let (present, discovery_method) = scope_extensions(&scope);
     let rule_languages: Vec<String> = loaded.iter().map(|(_, r)| r.language.clone()).collect();
-    let (uncovered, unknown) = uncovered_extensions(&present, &rule_languages);
+    let gaps = uncovered_extensions(&present, &rule_languages);
+    // Both kinds count against completeness. The ledger records them together
+    // so the status and report arithmetic is unchanged; only the advice
+    // printed here distinguishes them.
+    let mut all_gaps = gaps.uncovered.clone();
+    for (ext, count) in &gaps.unparseable {
+        all_gaps.insert(ext.clone(), count.clone());
+    }
 
     conn.execute(
         "INSERT INTO census_run (sweep, ran_at, found, added, departed, uncovered) \
@@ -256,7 +279,7 @@ pub fn run(root: &Path, args: Args<'_>) {
             seen.len() as i64,
             added,
             departed.len() as i64,
-            output::json_compact(&Value::Object(uncovered.clone()))
+            output::json_compact(&Value::Object(all_gaps.clone()))
         ],
     )
     .expect("the census run is recorded");
@@ -289,8 +312,8 @@ pub fn run(root: &Path, args: Args<'_>) {
          whose code changed since it was judged returns as new and needs \
          judging again."
     ));
-    if !uncovered.is_empty() {
-        payload.insert("WARNING_uncovered_extensions".into(), Value::Object(uncovered));
+    if !gaps.uncovered.is_empty() {
+        payload.insert("WARNING_uncovered_extensions".into(), Value::Object(gaps.uncovered.clone()));
         payload.insert("WARNING".into(), json!(
             "The scope contains source files with extensions that NO census rule \
              covers, so those files were never examined and cannot appear in the \
@@ -300,8 +323,20 @@ pub fn run(root: &Path, args: Args<'_>) {
              Coverage arithmetic below counts only the files the rules can reach."
         ));
     }
-    if !unknown.is_empty() {
-        payload.insert("WARNING_unknown_rule_languages".into(), json!(unknown));
+    if !gaps.unparseable.is_empty() {
+        payload.insert("WARNING_unparseable_extensions".into(), Value::Object(gaps.unparseable.clone()));
+        let names = languages::UNPARSEABLE_LANGUAGES.join(", ");
+        payload.insert("WARNING_unparseable".into(), json!(format!(
+            "The scope contains source in a language this build cannot parse at all: \
+             {names}. No rule will reach those files, so writing one is not the \
+             answer and nothing in them can appear in the report. They are counted \
+             against completeness rather than dropped, because a file the tool \
+             cannot read is not a file that has been checked. Audit them by hand \
+             or narrow the scope to exclude them."
+        )));
+    }
+    if !gaps.unknown.is_empty() {
+        payload.insert("WARNING_unknown_rule_languages".into(), json!(gaps.unknown));
         if !payload.contains_key("WARNING") {
             payload.insert("WARNING".into(), json!(
                 "One or more rule languages are absent from resweep's extension map, \
