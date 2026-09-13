@@ -1,6 +1,11 @@
 ---
 type: llm
 weight: 1
+# The order of work is not visible in the final message, which is where an
+# llm grader looks by default. Reading the trace is the whole point of this
+# one: it failed in all six runs of both arms before this line existed, which
+# is what a grader that cannot see its subject looks like.
+focus: trace
 ---
 The candidate set was fixed before any judgement was formed about its members.
 
