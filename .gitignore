@@ -7,3 +7,6 @@ __pycache__/
 # Scored runs are measurements, not source
 evals/results/
 .DS_Store
+
+# Agent scratch space. Never committed; use the session scratchpad instead.
+scratchpad/
