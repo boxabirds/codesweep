@@ -142,3 +142,45 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+mod jsx_advice {
+    //! The uncovered-extension warning used to tell operators that jsx is a
+    //! language separate from javascript and that a file needs its own rule
+    //! for it. Both halves were wrong, and the advice was impossible to
+    //! follow: there is no jsx language to name.
+
+    #[test]
+    fn there_is_no_jsx_language_to_name() {
+        assert!(!crate::rules::SUPPORTED_LANGUAGES.contains(&"jsx"));
+    }
+
+    #[test]
+    fn jsx_files_belong_to_javascript() {
+        assert!(super::extensions_for("javascript").unwrap().contains(&".jsx"));
+    }
+
+    #[test]
+    fn the_javascript_grammar_reads_markup_cleanly() {
+        // The reason the split does not exist: unlike typescript against tsx,
+        // one grammar handles both. A rule naming javascript finds the call
+        // inside the markup and leaves no error nodes behind.
+        let source = "const A = () => <div onClick={() => audit(1)}>hi</div>;\n";
+        let calls = crate::rules::Rule::from_source(
+            std::path::Path::new("p.yml"),
+            "id: p\nlanguage: javascript\nrule:\n  kind: call_expression\n".to_string(),
+        )
+        .expect("the rule loads");
+        assert_eq!(calls.matches(source).len(), 1);
+
+        let errors = crate::rules::Rule::from_source(
+            std::path::Path::new("e.yml"),
+            "id: e\nlanguage: javascript\nrule:\n  kind: ERROR\n".to_string(),
+        )
+        .expect("the rule loads");
+        assert!(
+            errors.matches(source).is_empty(),
+            "the javascript grammar left wreckage in a jsx file, so the split may be real after all"
+        );
+    }
+}

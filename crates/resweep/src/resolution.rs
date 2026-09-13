@@ -18,7 +18,9 @@
 //! contains against what is on disk.
 
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 use crate::discovery;
 

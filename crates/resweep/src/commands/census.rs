@@ -317,9 +317,10 @@ pub fn run(root: &Path, args: Args<'_>) {
         payload.insert("WARNING".into(), json!(
             "The scope contains source files with extensions that NO census rule \
              covers, so those files were never examined and cannot appear in the \
-             report. ast-grep treats tsx as a language separate from typescript, \
-             and jsx separately from javascript, so a .tsx file needs its own rule \
-             with `language: tsx`. Add a rule per language or narrow the scope. \
+             report. tsx is a language separate from typescript, so a .tsx file \
+             needs its own rule with `language: tsx`. There is no separate jsx \
+             language: one rule with `language: javascript` reaches .js and .jsx \
+             alike. Add a rule per language or narrow the scope. \
              Coverage arithmetic below counts only the files the rules can reach."
         ));
     }

@@ -95,13 +95,20 @@ narrowing excluded, because those sites will never appear.
 Broad rule plus more judgements costs tokens. Narrow rule costs correctness, and
 costs it invisibly.
 
-**One rule file per language.** ast-grep treats `tsx` as a language separate from
-`typescript`, and `jsx` separately from `javascript`. A rule saying
-`language: typescript` silently skips every `.tsx` file. This is not theoretical:
-it is how the rule originally shipped with this skill would have swept a React
-codebase, enumerated only the `.ts` files, printed `unjudged: 0`, and reported
-zero violations while every real violation sat in `.tsx`. Write one rule per
-language and pass them all to a single census.
+**One rule file per language, and check which languages you actually need.**
+`tsx` is a language separate from `typescript`, so a rule saying
+`language: typescript` silently skips every `.tsx` file. This is not
+theoretical: it is how the rule originally shipped with this skill would have
+swept a React codebase, enumerated only the `.ts` files, printed
+`unjudged: 0`, and reported zero violations while every real violation sat in
+`.tsx`.
+
+There is no matching split on the JavaScript side. One rule with
+`language: javascript` reaches `.js`, `.mjs`, `.cjs` and `.jsx` alike, and
+`language: jsx` is refused because no such language exists. Do not write a
+second rule for markup in JavaScript; do write one for markup in TypeScript.
+
+Write one rule per language you need and pass them all to a single census.
 
 Keep rule files somewhere durable and version-controlled, next to the code they
 audit. Do not leave them in a temp directory. The report reproduces the rule
