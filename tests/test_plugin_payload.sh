@@ -10,6 +10,7 @@
 set -uo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$HERE/.." && pwd)"
 PROBE_MARKET="resweep-payload-probe-market"
 PROBE_PLUGIN="resweep-payload-probe"
 PASS=0
@@ -125,6 +126,87 @@ check "and it installs anyway" "1" \
 FOREIGN="$(find "$HOME/.claude/plugins/cache/$PROBE_MARKET" -name payload -type f 2>/dev/null | head -1)"
 check "and its payload runs on the wrong platform" "payload ran" \
   "$([ -n "$FOREIGN" ] && "$FOREIGN" 2>&1)"
+
+printf '\nthe guidance reaches the tool where the plugin put it\n'
+# The path the guidance issues, run as written with the plugin root pointing at
+# this repository. A bare name only works if someone arranged for it, which is
+# what the change to a plugin-relative path removed.
+GUIDED="$(CLAUDE_PLUGIN_ROOT="$REPO" bash -c 'RESWEEP_SESSION_ID=guided-$$ "${CLAUDE_PLUGIN_ROOT}/bin/resweep" list --root .' 2>&1)"
+check "the plugin-relative path runs" "1" \
+  "$(printf '%s' "$GUIDED" | grep -cE 'no ledger|\[' || true)"
+check "the guidance issues that path and not a bare name" "0" \
+  "$(grep -cE '^resweep --root' "$REPO/skills/resweep/SKILL.md" || true)"
+check "and it issues it more than once" "1" \
+  "$([ "$(grep -c 'CLAUDE_PLUGIN_ROOT}/bin/resweep' "$REPO/skills/resweep/SKILL.md")" -ge 9 ] && echo 1 || echo 0)"
+
+printf '\nthe guidance stops before the protocol when the tool is missing\n'
+# The failure observed live: an agent found no command and improvised the whole
+# protocol by hand, which produces exactly the hand-picked candidate set this
+# tool exists to replace.
+check "there is a preflight step before step 1" "1" \
+  "$(grep -c '^### 0\.' "$REPO/skills/resweep/SKILL.md" || true)"
+check "it tells the reader to stop" "1" \
+  "$(grep -ci 'stop and say so' "$REPO/skills/resweep/SKILL.md" || true)"
+check "and not to search the codebase instead" "1" \
+  "$(tr '\n' ' ' < "$REPO/skills/resweep/SKILL.md" | grep -ci 'do not fall back to searching' || true)"
+
+MISSING="$(mktemp -d)"
+mkdir -p "$MISSING/bin"
+cp "$REPO/bin/resweep" "$MISSING/bin/resweep"
+ABSENT="$("$MISSING/bin/resweep" list --root . 2>&1)"
+"$MISSING/bin/resweep" list --root . >/dev/null 2>&1; ABSENT_RC=$?
+check "a plugin with no build refuses" "1" "$ABSENT_RC"
+check "and says how to get one" "1" \
+  "$(printf '%s' "$ABSENT" | grep -c 'install.sh' || true)"
+check "and names the toolchain it needs" "1" \
+  "$(printf '%s' "$ABSENT" | grep -c 'rustup.rs' || true)"
+
+printf '\na build for another machine says so, rather than failing as a format error\n'
+WRONG="$(mktemp -d)"
+mkdir -p "$WRONG/bin" "$WRONG/target/release"
+cp "$REPO/bin/resweep" "$WRONG/bin/resweep"
+# A real executable for a machine this is not. Written as an ELF header on
+# macOS or a Mach-O header on Linux, so `file` reports a genuine foreign
+# binary rather than an unidentifiable blob.
+case "$(uname -s)" in
+  Darwin) printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\002\000\076\000' > "$WRONG/target/release/resweep" ;;
+  *)      printf '\317\372\355\376\014\000\000\001\000\000\000\000\002\000\000\000' > "$WRONG/target/release/resweep" ;;
+esac
+chmod +x "$WRONG/target/release/resweep"
+FOREIGN_OUT="$("$WRONG/bin/resweep" list --root . 2>&1)"
+"$WRONG/bin/resweep" list --root . >/dev/null 2>&1; FOREIGN_RC=$?
+check "it refuses" "1" "$FOREIGN_RC"
+check "it names this machine" "1" \
+  "$(printf '%s' "$FOREIGN_OUT" | grep -c "$(uname -m)" || true)"
+check "it describes the build it found" "1" \
+  "$(printf '%s' "$FOREIGN_OUT" | grep -c 'the build is' || true)"
+check "it says how to get the right one" "1" \
+  "$(printf '%s' "$FOREIGN_OUT" | grep -c 'cargo build' || true)"
+check "and never surfaces a bare format error" "0" \
+  "$(printf '%s' "$FOREIGN_OUT" | grep -ci 'format error\|cannot execute\|permission denied' || true)"
+rm -rf "$MISSING" "$WRONG"
+
+printf '\nwith nothing else installed, a census still answers\n'
+# The claim the whole port exists to make. PATH is cut to the shell and the
+# core utilities, so neither a separately installed matching engine nor an
+# interpreter is reachable.
+BARE_PATH="/bin:/usr/bin"
+check "no matching engine on the stripped path" "0" \
+  "$(PATH="$BARE_PATH" command -v ast-grep >/dev/null 2>&1 && echo 1 || echo 0)"
+CLEAN="$(mktemp -d)"
+mkdir -p "$CLEAN/src"
+printf 'export function a() { try { x(); } catch (e) { return []; } }\n' > "$CLEAN/src/a.ts"
+printf 'export function b() { try { x(); } catch (e) { throw e; } }\n' > "$CLEAN/src/b.ts"
+cat > "$CLEAN/catch.yml" <<'EOF'
+id: ts-catch
+language: typescript
+rule:
+  kind: catch_clause
+EOF
+CENSUS="$(PATH="$BARE_PATH" RESWEEP_SESSION_ID="clean-$$" "$REPO/target/release/resweep"   census s --rule "$CLEAN/catch.yml" --scope src --question "swallowed?" --root "$CLEAN" 2>&1)"
+check "the census runs with nothing else installed" "2" \
+  "$(printf '%s' "$CENSUS" | grep -oE '"sites_found": [0-9]+' | grep -oE '[0-9]+' || echo missing)"
+rm -rf "$CLEAN" "${TMPDIR:-/tmp}/resweep/clean-$$"
 
 printf '\n%s passed, %s failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ]
