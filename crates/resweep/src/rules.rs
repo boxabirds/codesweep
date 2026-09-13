@@ -63,6 +63,8 @@ pub enum RuleError {
     Unreadable { path: PathBuf, cause: String },
     Unparseable { path: PathBuf, cause: String },
     Empty { path: PathBuf },
+    NoId { path: PathBuf },
+    NoLanguage { path: PathBuf },
     UnsupportedLanguage { path: PathBuf, language: String },
 }
 
@@ -77,6 +79,15 @@ impl fmt::Display for RuleError {
             }
             Self::Empty { path } => {
                 write!(f, "rule {} contains no rule", path.display())
+            }
+            // The same two sentences the replaced tool used. A rule file
+            // missing either field is not a rule, and saying which field is
+            // missing is the difference between a fix and a guess.
+            Self::NoId { path } => {
+                write!(f, "rule file {} has no top-level `id:` field", path.display())
+            }
+            Self::NoLanguage { path } => {
+                write!(f, "rule file {} has no top-level `language:` field", path.display())
             }
             Self::UnsupportedLanguage { path, language } => write!(
                 f,
@@ -124,7 +135,16 @@ impl Rule {
     }
 
     pub fn from_source(path: &Path, source: String) -> Result<Self, RuleError> {
+        // Both fields are read as text before anything is deserialised, so a
+        // missing one is named rather than arriving as a parser's own account
+        // of a shape it did not expect.
+        if declared_field(&source, "id:").is_none() {
+            return Err(RuleError::NoId { path: path.to_path_buf() });
+        }
         let declared = declared_language(&source);
+        if declared.is_none() {
+            return Err(RuleError::NoLanguage { path: path.to_path_buf() });
+        }
         // Checked before deserialising, because a language the dependency
         // knows but this build did not link deserialises perfectly well and
         // then panics the moment anything is parsed with it.
@@ -199,8 +219,12 @@ impl Rule {
 /// Deliberately shallow. It only has to find a top-level scalar in a rule file,
 /// and the alternative is deserialising first, which is the thing that panics.
 fn declared_language(source: &str) -> Option<String> {
+    declared_field(source, "language:")
+}
+
+fn declared_field(source: &str, field: &str) -> Option<String> {
     for line in source.lines() {
-        if let Some(rest) = line.strip_prefix("language:") {
+        if let Some(rest) = line.strip_prefix(field) {
             let value = rest.trim().trim_matches('"').trim_matches('\'');
             if !value.is_empty() {
                 return Some(value.to_string());
@@ -406,12 +430,71 @@ export const C = () => {
         assert!(err.to_string().contains("test.yml"), "{err}");
     }
 
-    // Retired with the subprocess, deliberately and with no replacement:
+    #[test]
+    fn a_rule_with_no_id_is_refused_and_says_which_field() {
+        let err = rule_from("language: typescript\nrule:\n  kind: catch_clause\n")
+            .expect_err("a rule without an id is not a rule");
+        let message = err.to_string();
+        assert!(message.contains("test.yml"), "{message}");
+        assert!(message.contains("`id:`"), "{message}");
+    }
+
+    #[test]
+    fn a_rule_with_no_language_is_refused_and_says_which_field() {
+        let err = rule_from("id: x\nrule:\n  kind: catch_clause\n")
+            .expect_err("a rule without a language is not a rule");
+        let message = err.to_string();
+        assert!(message.contains("test.yml"), "{message}");
+        assert!(message.contains("`language:`"), "{message}");
+    }
+
+    #[test]
+    fn a_rule_that_is_not_valid_at_all_names_the_path_and_the_reason() {
+        let err = rule_from("id: x\nlanguage: typescript\nrule:\n  nonsense: [\n")
+            .expect_err("that is not a rule");
+        let message = err.to_string();
+        assert!(message.contains("test.yml"), "{message}");
+        // The parser's own account of what it could not read. Swallowing it
+        // and saying only that the rule is invalid leaves the author guessing.
+        assert!(message.len() > "cannot parse rule test.yml: ".len(), "{message}");
+    }
+
+    #[test]
+    fn every_rule_file_in_the_repository_loads() {
+        // One assertion per file, so a failure names the rule rather than
+        // saying that one of five is broken.
+        let dir = Path::new(REPO).join("rules");
+        let mut checked = 0;
+        for entry in std::fs::read_dir(&dir).expect("the rules directory exists") {
+            let path = entry.expect("a readable entry").path();
+            if path.extension().and_then(|e| e.to_str()) != Some("yml") {
+                continue;
+            }
+            let rule = Rule::load(&path)
+                .unwrap_or_else(|e| panic!("{} will not load: {e}", path.display()));
+            assert!(!rule.id.is_empty(), "{} has an empty id", path.display());
+            assert!(
+                SUPPORTED_LANGUAGES.contains(&rule.language.as_str()),
+                "{} names {}, which this build cannot parse",
+                path.display(),
+                rule.language
+            );
+            checked += 1;
+        }
+        assert!(checked >= 5, "only {checked} rule files were checked");
+    }
+
+    // Three error paths retired with the subprocess, deliberately and with no
+    // replacement:
     //
-    //   - ast-grep missing from PATH
-    //   - ast-grep exiting with an unexpected status
-    //   - ast-grep emitting output that is not JSON
+    //   - the matching engine missing from PATH
+    //   - the matching engine exiting with an unexpected status
+    //   - the matching engine emitting output that cannot be parsed
     //
-    // The engine is linked in, so none of these states exists to be tested.
-    // Their absence is a consequence of the change, not a gap in coverage.
+    // The engine is linked in, so none of these states exists to be tested and
+    // none can be provoked. Their absence is a consequence of the change and
+    // not a gap in coverage. What replaces them is stronger and is above: an
+    // unsupported language is now refused by name before anything runs, which
+    // the subprocess could only report after the fact and in another program's
+    // words.
 }

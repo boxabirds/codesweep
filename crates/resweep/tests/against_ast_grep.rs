@@ -64,7 +64,15 @@ fn compare(rule_file: &str, source_name: &str, source: &str) {
         eprintln!("SKIP: ast-grep is not installed, so there is no oracle to compare against");
         return;
     };
-    let dir = std::env::temp_dir().join(format!("resweep-engine-{}", std::process::id()));
+    // Named per case, not per process. Tests in one binary run in parallel
+    // threads, and a shared directory that each case removes at the end takes
+    // another case's file with it. That produced a failure in one case and a
+    // pass in the same case on the next run, which is worse than either.
+    let dir = std::env::temp_dir().join(format!(
+        "resweep-engine-{}-{}",
+        std::process::id(),
+        source_name
+    ));
     std::fs::create_dir_all(&dir).expect("a place to put the file");
     let file = dir.join(source_name);
     std::fs::write(&file, source).expect("the file is written");
@@ -143,4 +151,34 @@ fn the_shipped_css_rule_agrees() {
 .d { border-color: black; }
 ",
     );
+}
+
+#[test]
+fn the_two_logical_default_rules_agree_on_their_own_languages() {
+    compare(
+        "rules/tsx-logical-default.yml",
+        "d.tsx",
+        "export const C = ({a, b}) => <div>{a || b}</div>;\nconst x = p ?? q;\n",
+    );
+}
+
+#[test]
+fn a_rule_that_matches_nothing_agrees_that_it_matched_nothing() {
+    // The empty case is worth comparing too. A matcher that silently returns
+    // nothing looks identical to one that correctly finds nothing, and the
+    // difference only shows when the same input produces sites for the oracle.
+    let Some(binary) = ast_grep() else {
+        eprintln!("SKIP: ast-grep is not installed, so there is no oracle to compare against");
+        return;
+    };
+    let dir = std::env::temp_dir().join(format!("resweep-empty-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a place to put the file");
+    let file = dir.join("e.ts");
+    let source = "export function a() { return 1; }\n";
+    std::fs::write(&file, source).expect("the file is written");
+    let rule_path = repo().join("rules/ts-catch-clause.yml");
+    let rule = resweep::rules::Rule::load(&rule_path).expect("the shipped rule loads");
+    assert!(rule.matches(source).is_empty());
+    assert!(oracle(&binary, &rule_path, &file).is_empty());
+    std::fs::remove_dir_all(&dir).ok();
 }
