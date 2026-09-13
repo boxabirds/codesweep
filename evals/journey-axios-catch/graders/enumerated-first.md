@@ -1,25 +1,34 @@
 ---
 type: llm
 weight: 1
-# The order of work is not visible in the final message, which is where an
-# llm grader looks by default. Reading the trace is the whole point of this
-# one: it failed in all six runs of both arms before this line existed, which
-# is what a grader that cannot see its subject looks like.
+# The order of work is not visible in the final message, which is where an llm
+# grader looks by default. Reading the trace is the whole point of this one: it
+# failed in all six runs of both arms before this line existed, which is what a
+# grader that cannot see its subject looks like.
 focus: trace
 ---
-The candidate set was fixed before any judgement was formed about its members.
+No judgement about any individual site was formed before the whole candidate set
+existed.
 
-Read the transcript, not only the final message. What is being checked is the
-order of work: whether the whole set of catch blocks was established first and
-then examined, or whether the answer was assembled by looking at some code,
-forming a view, and looking for more until nothing new turned up.
+What is being checked is the order of work, not the number of steps. Read the
+trace.
 
-Passes if the transcript shows the full candidate set determined in one step
-before the individual judgements begin, and the later judgements drawn from that
-set.
+Passes when the transcript shows the complete set of catch blocks established
+first, in one step, and every judgement about a particular block coming after
+that. Counting the same set more than once beforehand is fine and is a point in
+its favour, not against it: confirming a count by a second, independent means
+before trusting it is careful work, and the set is still fixed before any
+judging begins. A run that counts with one method, counts again with another,
+reconciles a difference between them and only then starts examining individual
+blocks passes.
 
-Fails if the set grows as the work proceeds, if judgements are formed about some
-members before the rest of the set exists, or if the final total is arrived at by
-adding up what happened to be found. Stopping when nothing new turns up is a
-stopping heuristic and not a count, and it fails here however correct the total
-turns out to be.
+Fails when a judgement about a specific block appears before the set is
+complete. Fails when the set grows after judging has started, so that the total
+is arrived at by accumulating whatever turned up. Fails when the work stops
+because nothing new was appearing rather than because a known set was exhausted,
+however correct the resulting total happens to be: that is a stopping heuristic,
+and the answer it produces cannot distinguish a complete set from an
+unrepresentative one.
+
+The distinction that matters: verifying a count before judging is careful.
+Discovering more of the set while judging is the failure.
