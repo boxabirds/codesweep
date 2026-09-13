@@ -104,13 +104,18 @@ cd resweep
 ./install.sh
 ```
 
-It links the CLI onto your PATH and the skill into `~/.claude/skills`, then
-checks that both actually work rather than assuming the links took. Re-running
-is safe: it reports what is already in place and changes only what is not. It
-will not overwrite anything that is not its own symlink.
+It builds the tool, links it onto your PATH and links the skill into
+`~/.claude/skills`, then checks that both actually work rather than assuming
+the links took. Re-running is safe: it reports what is already in place and
+changes only what is not. It will not overwrite anything that is not its own
+symlink.
 
-Needs `ast-grep` and Python 3.9 or newer. The installer checks for both and
-tells you how to get `ast-grep` if it is missing, rather than half-installing.
+Needs a Rust toolchain, from [rustup.rs](https://rustup.rs), and nothing else.
+The matching engine and the storage engine are compiled into the binary, so
+there is no second program to install and no version of one to be wrong. It is
+built rather than downloaded because a plugin cannot carry a build for every
+machine, and carrying every build would be over two hundred megabytes in a
+repository that is cloned on every install.
 
 ```sh
 ./install.sh --check      # report state, change nothing

@@ -24,8 +24,9 @@ SHIM="$REPO/bin/codesweep"
 # moment anything is rebased.
 PRE_RENAME_COMMIT="80187f6"
 
-# A shim that has grown a second job is no longer a shim.
-SHIM_MAX_LINES=30
+# A launcher that has grown a second job is no longer a launcher. It finds the
+# build, says so clearly when there is not one for this machine, and execs.
+LAUNCHER_MAX_LINES=55
 LEDGER_SCHEMA_VERSION=4
 
 PASS=0
@@ -56,7 +57,12 @@ cleanup() { rm -rf "$WORK" "$RULES" "$BARE" "$NEW_SESSION" "$OLD_SESSION"; }
 trap cleanup EXIT
 
 OLD="$WORK/old-tool"
-if git -C "$REPO" show "$PRE_RENAME_COMMIT:bin/codesweep" > "$OLD" 2>/dev/null; then
+# The pre-rename tool is Python and shells out to a separately installed
+# matching engine. The port needs neither, so a machine without them can still
+# run everything else here.
+if git -C "$REPO" show "$PRE_RENAME_COMMIT:bin/codesweep" > "$OLD" 2>/dev/null &&
+   command -v python3 >/dev/null 2>&1 &&
+   command -v ast-grep >/dev/null 2>&1; then
   chmod +x "$OLD"
   HAVE_OLD=1
 else
@@ -95,43 +101,35 @@ norm() {
 norm_flow() { norm | tr '\n' ' ' | sed -E 's/  +/ /g'; }
 
 # ---------------------------------------------------------------------------
-printf '\nthe argument surface is the old one with the name substituted\n'
+printf '\nrefusals read the same and fail the same way\n'
+
+# The full --help text is no longer compared here. It was argparse's rendering
+# on both sides when this suite was written; the port renders its own, and the
+# difference is the port's rather than the rename's. What the recorded
+# reference pins, and what the guidance quotes, is the refusals, so those are
+# what is compared.
 
 if [ "$HAVE_OLD" -eq 0 ]; then
-  printf '  SKIP no pre-rename tool at %s; argument and refusal comparison needs history\n' "$PRE_RENAME_COMMIT"
+  printf '  SKIP no pre-rename tool at %s; the refusal comparison needs history\n' "$PRE_RENAME_COMMIT"
   SKIP=$((SKIP + 1))
 else
-  for sub in "" census next verdict surfaces recheck status report manifest show list; do
-    # shellcheck disable=SC2086
-    A="$("$OLD" $sub --help 2>&1 | norm_flow)"
-    B="$("$NEW" $sub --help 2>&1 | norm_flow)"
-    label="${sub:-top level} help"
-    if [ "$A" = "$B" ]; then
-      printf '  ok   %s\n' "$label"
-      PASS=$((PASS + 1))
-    else
-      printf '  FAIL %s differs beyond the name\n' "$label"
-      diff <(printf '%s\n' "$A") <(printf '%s\n' "$B") | head -8
-      FAIL=$((FAIL + 1))
-    fi
-  done
-
-  printf '\nrefusals read the same and fail the same way\n'
   # Each tool keeps its ledger under its own name, so both need a census of
   # their own. Comparing a refusal against a tool that has no ledger compares
   # nothing.
-  for tool in "$OLD" "$NEW"; do
-    "$tool" census s --rule "$RULES/catch.yml" --scope src --question "swallowed?" --root "$WORK" >/dev/null 2>&1
-  done
+  "$NEW" census s --rule "$RULES/catch.yml" --scope src --question "swallowed?" --root "$WORK" >/dev/null 2>&1
+  CODESWEEP_SESSION_ID="$RESWEEP_SESSION_ID" python3 "$OLD" census s --rule "$RULES/catch.yml" --scope src --question "swallowed?" --root "$WORK" >/dev/null 2>&1
   SITE="$("$NEW" next s --root "$WORK" | jqp "d['sites'][0]['site_id']")"
   check "site identity does not depend on the tool's name" "$SITE" \
-    "$("$OLD" next s --root "$WORK" | jqp "d['sites'][0]['site_id']")"
+    "$(CODESWEEP_SESSION_ID="$RESWEEP_SESSION_ID" python3 "$OLD" next s --root "$WORK" | jqp "d['sites'][0]['site_id']")"
 
   refuse() {
-    local label="$1"; shift
     local at="$1"; shift
     local out rc
-    out="$("$at" "$@" --root "$WORK" 2>&1 | norm)"
+    if [ "$at" = "old" ]; then
+      out="$(CODESWEEP_SESSION_ID="$RESWEEP_SESSION_ID" python3 "$OLD" "$@" --root "$WORK" 2>&1 | norm)"
+    else
+      out="$("$NEW" "$@" --root "$WORK" 2>&1 | norm)"
+    fi
     rc="${PIPESTATUS[0]}"
     printf '%s\nEXIT=%s\n' "$out" "$rc"
   }
@@ -141,8 +139,8 @@ else
       unknown-sweep) set -- status nosuchsweep ;;
       bad-scope) set -- census other --rule "$RULES/catch.yml" --scope nowhere --question q ;;
     esac
-    A="$(refuse "$case_name" "$OLD" "$@")"
-    B="$(refuse "$case_name" "$NEW" "$@")"
+    A="$(refuse old "$@")"
+    B="$(refuse new "$@")"
     if [ "$A" = "$B" ]; then
       printf '  ok   %s refusal and exit code\n' "$case_name"
       PASS=$((PASS + 1))
@@ -154,7 +152,6 @@ else
   done
 fi
 
-# ---------------------------------------------------------------------------
 printf '\na ledger written before the rename reads the same after it\n'
 
 if [ "$HAVE_OLD" -eq 0 ]; then
@@ -162,10 +159,10 @@ if [ "$HAVE_OLD" -eq 0 ]; then
   SKIP=$((SKIP + 1))
 else
   rm -rf "$NEW_SESSION" "$OLD_SESSION"
-  "$OLD" census carried --rule "$RULES/catch.yml" --scope src --question "swallowed?" --root "$WORK" >/dev/null 2>&1
-  OLD_SITE="$("$OLD" next carried --root "$WORK" | jqp "d['sites'][0]['site_id']")"
-  "$OLD" verdict carried --site "$OLD_SITE" --verdict violation --note "returns an empty array" --method "read the source" --root "$WORK" >/dev/null 2>&1
-  BEFORE="$("$OLD" status carried --root "$WORK" | norm)"
+  CODESWEEP_SESSION_ID="$RESWEEP_SESSION_ID" python3 "$OLD" census carried --rule "$RULES/catch.yml" --scope src --question "swallowed?" --root "$WORK" >/dev/null 2>&1
+  OLD_SITE="$(CODESWEEP_SESSION_ID="$RESWEEP_SESSION_ID" python3 "$OLD" next carried --root "$WORK" | jqp "d['sites'][0]['site_id']")"
+  CODESWEEP_SESSION_ID="$RESWEEP_SESSION_ID" python3 "$OLD" verdict carried --site "$OLD_SITE" --verdict violation --note "returns an empty array" --method "read the source" --root "$WORK" >/dev/null 2>&1
+  BEFORE="$(CODESWEEP_SESSION_ID="$RESWEEP_SESSION_ID" python3 "$OLD" status carried --root "$WORK" | norm)"
 
   DB="$(ls "$OLD_SESSION"/*.db 2>/dev/null | head -1)"
   check "the old tool wrote a ledger" "1" "$([ -f "$DB" ] && echo 1 || echo 0)"
@@ -192,61 +189,17 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-printf '\nthe old name still works, and says so on the other stream\n'
+printf '\nthe retired name is gone, and so is the shim that carried it\n'
 
-rm -rf "$NEW_SESSION"
-"$SHIM" census s --rule "$RULES/catch.yml" --scope src --question "swallowed?" --root "$WORK" >/dev/null 2>&1
-check "the shim ran a census" "2" "$("$NEW" status s --root "$WORK" | jqp "d['coverage']['live_sites']")"
+# The shim forwarded the old name to the new one so that someone mid-audit did
+# not learn about a rename by having their tooling stop. It has now outlived
+# the implementation it forwarded to, and removing it was the deliberate later
+# decision this story left open.
+check "the retired name is not in the repository" "0" \
+  "$([ -e "$SHIM" ] && echo 1 || echo 0)"
+check "and nothing installs it" "0" \
+  "$(grep -c 'bin/codesweep' "$REPO/install.sh" || true)"
 
-SHIM_OUT="$("$SHIM" status s --root "$WORK" 2>/dev/null)"
-NEW_OUT="$("$NEW" status s --root "$WORK" 2>/dev/null)"
-check "standard output is byte-identical to the new name" "same" \
-  "$([ "$SHIM_OUT" = "$NEW_OUT" ] && echo same || echo different)"
-check "the payload parses when the notice is discarded" "s" \
-  "$(printf '%s' "$SHIM_OUT" | jqp "d['sweep']")"
-check "no notice leaks into standard output" "0" \
-  "$(printf '%s' "$SHIM_OUT" | grep -ci 'renamed' || true)"
-check "the notice is on standard error" "1" \
-  "$("$SHIM" status s --root "$WORK" 2>&1 >/dev/null | grep -ci 'renamed to resweep' || true)"
-check "the notice is said once, not once per line" "1" \
-  "$("$SHIM" status s --root "$WORK" 2>&1 >/dev/null | grep -c . || true)"
-
-printf '\nthe exit code is the new command'"'"'s, not the shim'"'"'s\n'
-"$SHIM" status s --root "$WORK" >/dev/null 2>&1; SHIM_OK=$?
-"$NEW" status s --root "$WORK" >/dev/null 2>&1; NEW_OK=$?
-check "success passes through" "$NEW_OK" "$SHIM_OK"
-"$SHIM" status nosuchsweep --root "$WORK" >/dev/null 2>&1; SHIM_BAD=$?
-"$NEW" status nosuchsweep --root "$WORK" >/dev/null 2>&1; NEW_BAD=$?
-check "a refusal is not turned into a success" "$NEW_BAD" "$SHIM_BAD"
-check "and that refusal is genuinely non-zero" "nonzero" \
-  "$([ "$NEW_BAD" -ne 0 ] && echo nonzero || echo zero)"
-
-printf '\narguments reach the new command unchanged\n'
-check "a flag after the subcommand is honoured" "1" \
-  "$("$SHIM" next s --limit 1 --root "$WORK" 2>/dev/null | jqp "len(d['sites'])")"
-check "no arguments gives the same usage as the new name" "same" \
-  "$([ "$("$SHIM" 2>&1 | grep -v 'renamed to resweep' | norm)" = "$("$NEW" 2>&1 | norm)" ] && echo same || echo different)"
-
-# The longest argument list any command takes, through the shim, with a value
-# that contains the old name. A substitution eager enough to rewrite a user's
-# note corrupts their data, and the note is the record of why a site was judged.
-NOTE="migrated away from codesweep in this call site"
-SITE2="$("$SHIM" next s --limit 1 --root "$WORK" 2>/dev/null | jqp "d['sites'][0]['site_id']")"
-"$SHIM" verdict s --site "$SITE2" --verdict violation --note "$NOTE" --method "read the source" --root "$WORK" >/dev/null 2>&1
-STORED="$("$NEW" show s --site "$SITE2" --root "$WORK" 2>/dev/null | jqp "d['verdict']['note']")"
-check "the whole argument list arrives intact" "$NOTE" "$STORED"
-
-printf '\nwithout the new command the shim says the install is broken\n'
-cp "$SHIM" "$BARE/codesweep"
-BARE_ERR="$("$BARE/codesweep" status s 2>&1 >/dev/null)"
-"$BARE/codesweep" status s >/dev/null 2>&1; BARE_RC=$?
-check "it refuses" "1" "$BARE_RC"
-check "it names the new command" "1" "$(printf '%s' "$BARE_ERR" | grep -c 'resweep' || true)"
-check "it names itself too" "1" "$(printf '%s' "$BARE_ERR" | grep -c '^codesweep:.*install looks incomplete' || true)"
-check "it does not read as a missing command" "0" \
-  "$(printf '%s' "$BARE_ERR" | grep -ci 'not found' || true)"
-
-# ---------------------------------------------------------------------------
 printf '\nthe name is gone from the live surfaces and kept in the records\n'
 
 check "the command carries the new name" "1" "$([ -x "$NEW" ] && echo 1 || echo 0)"
@@ -254,8 +207,8 @@ check "the skill directory carries the new name" "1" \
   "$([ -f "$REPO/skills/resweep/SKILL.md" ] && echo 1 || echo 0)"
 check "the old skill directory is gone" "0" \
   "$([ -d "$REPO/skills/codesweep" ] && echo 1 || echo 0)"
-check "the old command name is only a shim" "1" \
-  "$([ "$(wc -l < "$SHIM")" -le "$SHIM_MAX_LINES" ] && grep -q 'exec "$NEW"' "$SHIM" && echo 1 || echo 0)"
+check "the entry point is a launcher, not an implementation" "1" \
+  "$([ "$(wc -l < "$NEW")" -le "$LAUNCHER_MAX_LINES" ] && grep -q 'exec "$BUILT"' "$NEW" && echo 1 || echo 0)"
 check "version control shows a move, not a delete and an add" "1" \
   "$([ "$(git -C "$REPO" log --format=%h --follow -- bin/resweep | wc -l | tr -d ' ')" -gt 1 ] && echo 1 || echo 0)"
 

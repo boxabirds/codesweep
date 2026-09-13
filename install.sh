@@ -164,10 +164,6 @@ unlink_if_ours() {
 verify() {
   echo "verification"
 
-  if [ ! -x "$CLI_SOURCE" ]; then
-    chmod +x "$CLI_SOURCE" 2>/dev/null && did "made $CLI_SOURCE executable"
-  fi
-
   # Exercise the link this script made, not whatever `resweep` PATH happens
   # to resolve to. Checking PATH first would let a pre-existing install
   # elsewhere report success for a link that never took.

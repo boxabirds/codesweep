@@ -218,6 +218,10 @@ mod tests {
     // repository root.
     const REPO: &str = "../..";
 
+    // The check that this list is the one the replaced tool claimed, minus
+    // scss, lives in tests/ledger_matches_python.rs. It has to read that tool
+    // out of version control, and the helper that does so is there.
+
     fn rule_from(yaml: &str) -> Result<Rule, RuleError> {
         Rule::from_source(Path::new("test.yml"), yaml.to_string())
     }
@@ -388,33 +392,6 @@ export const C = () => {
                 "{name} produced no tree"
             );
         }
-    }
-
-    #[test]
-    fn the_supported_list_is_the_python_tools_list_minus_scss() {
-        // The port's language set is not free to drift from the tool it
-        // replaces. Read the list out of the tool rather than restating it,
-        // so the two cannot disagree unnoticed.
-        let tool = std::fs::read_to_string(Path::new(REPO).join("bin/resweep"))
-            .expect("the tool being ported is in the repository");
-        let block = tool
-            .split("LANGUAGE_EXTENSIONS = {")
-            .nth(1)
-            .and_then(|rest| rest.split("\n}").next())
-            .expect("the tool declares a language map");
-        let mut claimed: Vec<String> = block
-            .lines()
-            .filter_map(|line| line.trim().strip_prefix('"'))
-            .filter_map(|line| line.split('"').next())
-            .map(|s| s.to_string())
-            .collect();
-        claimed.retain(|name| name != "scss");
-        claimed.sort();
-
-        let mut supported: Vec<String> =
-            SUPPORTED_LANGUAGES.iter().map(|s| s.to_string()).collect();
-        supported.sort();
-        assert_eq!(supported, claimed);
     }
 
     #[test]
